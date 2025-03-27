@@ -1,27 +1,39 @@
-FROM python:3.11.8
+FROM python:3.11.8-slim
 
 WORKDIR /app
+
+# 安裝編譯工具
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # 複製依賴文件
 COPY requirements.txt .
 
-# 安裝基本依賴
-RUN pip install --no-cache-dir flask>=2.0.0 Werkzeug>=2.0.0 gunicorn>=20.0.0
+# 升級 pip
+RUN pip install --upgrade pip
+
+# 安裝 Flask 和基本依賴
+RUN pip install --no-cache-dir \
+    flask==3.0.2 \
+    Werkzeug==3.0.1 \
+    gunicorn==21.2.0
 
 # 安裝 LINE Bot SDK
-RUN pip install --no-cache-dir line-bot-sdk>=3.0.0
+RUN pip install --no-cache-dir line-bot-sdk==3.7.0
 
 # 安裝 Google API 相關依賴
 RUN pip install --no-cache-dir \
-    google-auth-oauthlib>=1.0.0 \
-    google-auth-httplib2>=0.1.0 \
-    google-api-python-client>=2.0.0
+    google-auth-oauthlib==1.2.0 \
+    google-auth-httplib2==0.2.0 \
+    google-api-python-client==2.120.0
 
 # 安裝其他依賴
 RUN pip install --no-cache-dir \
-    openai>=1.0.0 \
-    python-dotenv>=0.19.0 \
-    requests>=2.25.0
+    openai==1.12.0 \
+    python-dotenv==1.0.1 \
+    requests==2.31.0
 
 # 複製應用程式代碼
 COPY . .
