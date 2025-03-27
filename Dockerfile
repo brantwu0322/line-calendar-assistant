@@ -8,29 +8,18 @@ RUN apt-get update && \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 複製依賴文件
-COPY requirements.txt .
-
 # 升級 pip
 RUN pip install --upgrade pip
 
-# 安裝 Flask 和基本依賴
+# 安裝所有依賴
 RUN pip install --no-cache-dir \
     flask==3.0.2 \
     Werkzeug==3.0.1 \
-    gunicorn==21.2.0
-
-# 安裝 LINE Bot SDK
-RUN pip install --no-cache-dir line-bot-sdk==3.7.0
-
-# 安裝 Google API 相關依賴
-RUN pip install --no-cache-dir \
+    gunicorn==21.2.0 \
+    line-bot-sdk==3.7.0 \
     google-auth-oauthlib==1.2.0 \
     google-auth-httplib2==0.2.0 \
-    google-api-python-client==2.120.0
-
-# 安裝其他依賴
-RUN pip install --no-cache-dir \
+    google-api-python-client==2.120.0 \
     openai==1.12.0 \
     python-dotenv==1.0.1 \
     requests==2.31.0
