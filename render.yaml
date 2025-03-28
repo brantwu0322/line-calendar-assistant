@@ -10,19 +10,4 @@ services:
       - key: PORT
         value: 10000
       - key: PYTHONUNBUFFERED
-        value: "true"
-      # LINE Bot 設定
-      - key: LINE_CHANNEL_ACCESS_TOKEN
-        sync: false
-      - key: LINE_CHANNEL_SECRET
-        sync: false
-      # OpenAI 設定
-      - key: OPENAI_API_KEY
-        sync: false
-      # Google Calendar 設定
-      - key: GOOGLE_CALENDAR_ID
-        sync: false
-      - key: GOOGLE_CALENDAR_CREDENTIALS
-        sync: false
-      - key: GOOGLE_CALENDAR_TOKEN
-        sync: false 
+        value: "true" 
