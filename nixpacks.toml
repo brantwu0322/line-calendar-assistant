@@ -1,5 +1,12 @@
 [phases.setup]
-nixPkgs = ["python39"]
+nixPkgs = ["python39", "gcc"]
+
+[phases.install]
+cmds = ["python -m venv /opt/venv && . /opt/venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt"]
+
+[start]
+cmd = "python app.py"
 
 [variables]
-PYTHON_VERSION = "3.9.18" 
+PYTHON_VERSION = "3.9.18"
+PATH = "/opt/venv/bin:${PATH}" 
