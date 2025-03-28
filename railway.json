@@ -1,11 +1,11 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "DOCKERFILE",
-    "buildCommand": "docker build -t app ."
+    "builder": "NIXPACKS",
+    "buildCommand": null
   },
   "deploy": {
-    "startCommand": "docker run -p $PORT:5000 app",
+    "startCommand": "gunicorn --bind 0.0.0.0:$PORT app:app",
     "healthcheckPath": "/",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE"
