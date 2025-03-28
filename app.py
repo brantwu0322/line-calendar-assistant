@@ -281,46 +281,57 @@ def handle_message(event):
     logger.info(f"收到文字訊息: {event.message.text}")
     logger.debug(f"事件詳情: {event}")
     
-    try:
-        if event.message.text.lower() == "測試":
-            reply_text = "收到測試訊息！LINE Bot 正常運作中。"
-        else:
-            event_data = parse_event_text(event.message.text)
-            if event_data:
-                success, result = create_calendar_event(event_data)
-                if success:
-                    reply_text = f"已成功建立行程：{event_data['summary']}\n{result}"
-                else:
-                    reply_text = f"建立行程失敗：{result}"
+    max_retries = 3
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            if event.message.text.lower() == "測試":
+                reply_text = "收到測試訊息！LINE Bot 正常運作中。"
             else:
-                reply_text = "無法解析行程資訊。您可以這樣說：\n- 明天下午兩點跟客戶開會\n- 下週三早上九點去看牙醫\n- 每週五下午三點做瑜珈\n- 三天後下午四點半打籃球\n- 連續四個禮拜的週一早上九點開會"
-        
-        logger.info(f"準備回覆訊息: {reply_text}")
-        try:
-            messaging_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[TextMessage(text=reply_text)]
+                event_data = parse_event_text(event.message.text)
+                if event_data:
+                    success, result = create_calendar_event(event_data)
+                    if success:
+                        reply_text = f"已成功建立行程：{event_data['summary']}\n{result}"
+                    else:
+                        reply_text = f"建立行程失敗：{result}"
+                else:
+                    reply_text = "無法解析行程資訊。您可以這樣說：\n- 明天下午兩點跟客戶開會\n- 下週三早上九點去看牙醫\n- 每週五下午三點做瑜珈\n- 三天後下午四點半打籃球\n- 連續四個禮拜的週一早上九點開會"
+            
+            logger.info(f"準備回覆訊息: {reply_text}")
+            try:
+                messaging_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=reply_text)]
+                    )
                 )
-            )
-            logger.info("成功發送回覆訊息")
+                logger.info("成功發送回覆訊息")
+                break  # 成功發送後跳出重試循環
+            except Exception as e:
+                logger.error(f"發送回覆訊息時發生錯誤: {str(e)}")
+                logger.exception("詳細錯誤資訊：")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    raise
+                continue
         except Exception as e:
-            logger.error(f"發送回覆訊息時發生錯誤: {str(e)}")
+            logger.error(f"處理訊息時發生錯誤: {str(e)}")
             logger.exception("詳細錯誤資訊：")
-            raise
-    except Exception as e:
-        logger.error(f"處理訊息時發生錯誤: {str(e)}")
-        logger.exception("詳細錯誤資訊：")
-        try:
-            messaging_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[TextMessage(text=f"處理訊息時發生錯誤：{str(e)}")]
-                )
-            )
-        except Exception as reply_error:
-            logger.error(f"發送錯誤訊息時也發生錯誤: {str(reply_error)}")
-            logger.exception("詳細錯誤資訊：")
+            retry_count += 1
+            if retry_count >= max_retries:
+                try:
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text=f"處理訊息時發生錯誤，請稍後再試。")]
+                        )
+                    )
+                except Exception as reply_error:
+                    logger.error(f"發送錯誤訊息時也發生錯誤: {str(reply_error)}")
+                    logger.exception("詳細錯誤資訊：")
+                break
 
 @handler.add(MessageEvent, message=AudioMessageContent)
 def handle_audio_message(event):
