@@ -128,6 +128,8 @@ def parse_event_text(text):
     try:
         # 使用 GPT-4 進行語意分析
         client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        logger.info("正在調用 GPT-4 API...")
+        
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[
@@ -178,6 +180,9 @@ def parse_event_text(text):
             temperature=0
         )
         
+        logger.info("收到 GPT-4 回應")
+        logger.info(f"GPT-4 原始回應：{response.choices[0].message.content}")
+        
         parsed_data = json.loads(response.choices[0].message.content)
         logger.info(f"GPT 解析結果：{json.dumps(parsed_data, ensure_ascii=False)}")
         
@@ -188,12 +193,16 @@ def parse_event_text(text):
         # 取得當前時間
         now = datetime.now()
         today = now.date()
+        logger.info(f"當前日期：{today}")
         
         # 解析日期
         date_str = parsed_data.get('date_type')
         if not date_str:
+            logger.info("未找到日期類型")
             return None
             
+        logger.info(f"解析到的日期類型：{date_str}")
+        
         # 計算目標日期
         if date_str == '今天':
             target_date = today
@@ -229,10 +238,14 @@ def parse_event_text(text):
             logger.info(f"無法解析的日期格式：{date_str}")
             return None
         
+        logger.info(f"計算得到的目標日期：{target_date}")
+        
         # 設定時間
         hour = int(parsed_data.get('hour', 0))
         minute = int(parsed_data.get('minute', 0))
         time_period = parsed_data.get('time_period')
+        
+        logger.info(f"解析到的時間：{hour}點{minute}分 {time_period}")
         
         # 處理上午/下午
         if time_period == '下午' and hour < 12:
@@ -240,8 +253,13 @@ def parse_event_text(text):
         elif time_period == '上午' and hour == 12:
             hour = 0
         
+        logger.info(f"轉換後的時間：{hour}點{minute}分")
+        
         start_time = datetime.combine(target_date, time(hour, minute))
         end_time = start_time + timedelta(hours=1)
+        
+        logger.info(f"開始時間：{start_time}")
+        logger.info(f"結束時間：{end_time}")
         
         # 建立事件資料
         event_data = {
