@@ -146,9 +146,26 @@ def parse_event_text(text):
                     }
                     
                     規則：
-                    1. is_recurring 只有在輸入明確包含「每週」、「每個禮拜」或「連續X個週Y」等循環描述時才設為 true
-                    2. recurrence_count 只有在 is_recurring 為 true 時才設定數值，預設為 null
-                    3. 一般的單次行程（如：明天下午三點開會）應該將 is_recurring 設為 false
+                    1. 時間解析：
+                       - "早上"、"上午"、"早上" 都視為 "上午"
+                       - "下午"、"下午"、"晚上" 都視為 "下午"
+                       - 如果沒有指定上午/下午，根據小時判斷（12點前為上午，12點後為下午）
+                    
+                    2. 日期解析：
+                       - "明天" 指明天
+                       - "後天" 指後天
+                       - "大後天" 指大後天
+                       - "下週X" 指下週的某一天
+                       - "下下週X" 指下下週的某一天
+                       - "連續X個週Y" 指連續X週的週Y
+                    
+                    3. 循環事件：
+                       - 只有明確包含「每週」、「每個禮拜」或「連續X個週Y」等循環描述時才設為 true
+                       - recurrence_count 只有在 is_recurring 為 true 時才設定數值
+                    
+                    4. 事件描述：
+                       - 保留原始描述中的關鍵資訊
+                       - 移除時間相關的描述詞
                     
                     只輸出 JSON 格式，不要有其他文字。如果無法解析，輸出空物件 {}.
                     """
@@ -199,12 +216,15 @@ def parse_event_text(text):
             days_ahead = (target_weekday - current_weekday + 14) % 14
             target_date = today + timedelta(days=days_ahead)
         elif date_str.startswith('連續'):
+            # 解析連續週數
+            count = int(date_str.split('個')[0].replace('連續', ''))
             weekday_str = date_str.split('週')[1]
             weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
             target_weekday = weekday_map[weekday_str]
             current_weekday = today.weekday()
             days_ahead = (target_weekday - current_weekday + 7) % 7
             target_date = today + timedelta(days=days_ahead)
+            parsed_data['recurrence_count'] = count
         else:
             logger.info(f"無法解析的日期格式：{date_str}")
             return None
