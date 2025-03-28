@@ -149,9 +149,12 @@ def parse_event_text(text):
                     
                     規則：
                     1. 時間解析：
-                       - "早上"、"上午"、"早上" 都視為 "上午"
-                       - "下午"、"下午"、"晚上" 都視為 "下午"
+                       - "早上"、"上午"、"早上"、"早上" 都視為 "上午"
+                       - "下午"、"下午"、"晚上"、"晚上" 都視為 "下午"
                        - 如果沒有指定上午/下午，根據小時判斷（12點前為上午，12點後為下午）
+                       - 數字可以用中文或阿拉伯數字表示，都要轉換成阿拉伯數字
+                       - "點"、"時" 都表示小時
+                       - "分" 表示分鐘
                     
                     2. 日期解析：
                        - "明天" 指明天
@@ -160,6 +163,7 @@ def parse_event_text(text):
                        - "下週X" 指下週的某一天
                        - "下下週X" 指下下週的某一天
                        - "連續X個週Y" 指連續X週的週Y
+                       - "X天後" 指X天後
                     
                     3. 循環事件：
                        - 只有明確包含「每週」、「每個禮拜」或「連續X個週Y」等循環描述時才設為 true
@@ -168,6 +172,18 @@ def parse_event_text(text):
                     4. 事件描述：
                        - 保留原始描述中的關鍵資訊
                        - 移除時間相關的描述詞
+                    
+                    範例：
+                    輸入：「明天下午兩點跟客戶開會」
+                    輸出：{
+                        "date_type": "明天",
+                        "time_period": "下午",
+                        "hour": "2",
+                        "minute": "0",
+                        "is_recurring": false,
+                        "recurrence_count": null,
+                        "summary": "跟客戶開會"
+                    }
                     
                     只輸出 JSON 格式，不要有其他文字。如果無法解析，輸出空物件 {}.
                     """
@@ -234,6 +250,10 @@ def parse_event_text(text):
             days_ahead = (target_weekday - current_weekday + 7) % 7
             target_date = today + timedelta(days=days_ahead)
             parsed_data['recurrence_count'] = count
+        elif date_str.endswith('天後'):
+            # 解析 X 天後
+            days = int(date_str.replace('天後', ''))
+            target_date = today + timedelta(days=days)
         else:
             logger.info(f"無法解析的日期格式：{date_str}")
             return None
