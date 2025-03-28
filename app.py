@@ -53,6 +53,32 @@ api_client = ApiClient(configuration)
 messaging_api = MessagingApi(api_client)
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
+# 添加保活機制
+def keep_alive():
+    """定期發送保活請求"""
+    try:
+        messaging_api.get_bot_info()
+        logger.info("LINE API 保活成功")
+    except Exception as e:
+        logger.error(f"LINE API 保活失敗: {str(e)}")
+        logger.exception("詳細錯誤資訊：")
+
+# 在應用程式啟動時設置保活機制
+@app.before_first_request
+def setup_keep_alive():
+    """設置保活機制"""
+    import threading
+    import time
+    
+    def keep_alive_loop():
+        while True:
+            keep_alive()
+            time.sleep(1800)  # 每30分鐘執行一次
+    
+    thread = threading.Thread(target=keep_alive_loop, daemon=True)
+    thread.start()
+    logger.info("已啟動 LINE API 保活機制")
+
 # OpenAI API 設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
