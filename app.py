@@ -11,7 +11,7 @@ from linebot.v3.webhooks import (
     TextMessageContent,
     AudioMessageContent
 )
-from linebot.v3.messaging import Configuration
+from linebot.v3.messaging import Configuration, MessagingApi
 from linebot.v3.messaging.models import (
     TextMessage,
     ReplyMessageRequest,
@@ -25,8 +25,6 @@ from googleapiclient.discovery import build
 import speech_recognition as sr
 import tempfile
 import json
-from linebot.v3.messaging.api import MessagingApi
-from linebot.v3.messaging.api_client import ApiClient
 import openai
 import requests
 
@@ -48,10 +46,14 @@ for handler in logging.getLogger().handlers[:]:
 app = Flask(__name__)
 
 # LINE Bot 設定
-configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
-api_client = ApiClient(configuration)
-messaging_api = MessagingApi(api_client)
-handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
+channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+channel_secret = os.getenv('LINE_CHANNEL_SECRET')
+
+configuration = Configuration(
+    access_token=channel_access_token
+)
+handler = WebhookHandler(channel_secret)
+messaging_api = MessagingApi(configuration)
 
 # 添加保活機制
 def keep_alive():
@@ -155,6 +157,7 @@ def parse_event_text(text):
                        - 數字可以用中文或阿拉伯數字表示，都要轉換成阿拉伯數字
                        - "點"、"時" 都表示小時
                        - "分" 表示分鐘
+                       - "半" 表示 30 分
                     
                     2. 日期解析：
                        - "明天" 指明天
@@ -174,16 +177,60 @@ def parse_event_text(text):
                        - 移除時間相關的描述詞
                     
                     範例：
-                    輸入：「明天下午兩點跟客戶開會」
-                    輸出：{
-                        "date_type": "明天",
-                        "time_period": "下午",
-                        "hour": "2",
-                        "minute": "0",
-                        "is_recurring": false,
-                        "recurrence_count": null,
-                        "summary": "跟客戶開會"
-                    }
+                    1. 輸入：「明天下午兩點跟客戶開會」
+                       輸出：{
+                           "date_type": "明天",
+                           "time_period": "下午",
+                           "hour": "2",
+                           "minute": "0",
+                           "is_recurring": false,
+                           "recurrence_count": null,
+                           "summary": "跟客戶開會"
+                       }
+                    
+                    2. 輸入：「下週三早上九點去看牙醫」
+                       輸出：{
+                           "date_type": "下週三",
+                           "time_period": "上午",
+                           "hour": "9",
+                           "minute": "0",
+                           "is_recurring": false,
+                           "recurrence_count": null,
+                           "summary": "去看牙醫"
+                       }
+                    
+                    3. 輸入：「每週五下午三點做瑜珈」
+                       輸出：{
+                           "date_type": "下週五",
+                           "time_period": "下午",
+                           "hour": "3",
+                           "minute": "0",
+                           "is_recurring": true,
+                           "recurrence_count": 1,
+                           "summary": "做瑜珈"
+                       }
+                    
+                    4. 輸入：「三天後下午四點半打籃球」
+                       輸出：{
+                           "date_type": "3天後",
+                           "time_period": "下午",
+                           "hour": "4",
+                           "minute": "30",
+                           "is_recurring": false,
+                           "recurrence_count": null,
+                           "summary": "打籃球"
+                       }
+                    
+                    5. 輸入：「連續四個禮拜的週一早上九點開會」
+                       輸出：{
+                           "date_type": "連續4個週一",
+                           "time_period": "上午",
+                           "hour": "9",
+                           "minute": "0",
+                           "is_recurring": true,
+                           "recurrence_count": 4,
+                           "summary": "開會"
+                       }
                     
                     只輸出 JSON 格式，不要有其他文字。如果無法解析，輸出空物件 {}.
                     """
