@@ -414,9 +414,11 @@ def handle_message(event):
                 # 檢查是否為測試訊息
                 if event.message.text.lower() == "測試":
                     logging.info("收到測試訊息")
-                    line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text="收到您的測試訊息！")
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text="收到您的測試訊息！")]
+                        )
                     )
                     return
                 
@@ -430,24 +432,30 @@ def handle_message(event):
                     if event_info:
                         logging.info("成功解析事件資訊，開始建立事件")
                         # 建立事件
-                        event_id = create_calendar_event(event_info)
-                        if event_id:
-                            logging.info(f"成功建立事件，ID: {event_id}")
-                            line_bot_api.reply_message(
-                                event.reply_token,
-                                TextSendMessage(text=f"已成功建立行程：\n{event_info['summary']}\n時間：{event_info['start']} - {event_info['end']}")
+                        success, result = create_calendar_event(event_info)
+                        if success:
+                            logging.info(f"成功建立事件，結果: {result}")
+                            messaging_api.reply_message(
+                                ReplyMessageRequest(
+                                    reply_token=event.reply_token,
+                                    messages=[TextMessage(text=f"已成功建立行程：\n{event_info['summary']}\n時間：{event_info['start']['dateTime']} - {event_info['end']['dateTime']}")]
+                                )
                             )
                         else:
                             logging.error("建立事件失敗")
-                            line_bot_api.reply_message(
-                                event.reply_token,
-                                TextSendMessage(text="抱歉，建立行程時發生錯誤。")
+                            messaging_api.reply_message(
+                                ReplyMessageRequest(
+                                    reply_token=event.reply_token,
+                                    messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
+                                )
                             )
                     else:
                         logging.error("無法解析事件資訊")
-                        line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")
+                        messaging_api.reply_message(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")]
+                            )
                         )
                     break
                 else:
@@ -462,9 +470,11 @@ def handle_message(event):
                     )
                     reply_text = response.choices[0].message.content
                     logging.info(f"GPT-4 回應: {reply_text}")
-                    line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text=reply_text)
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text=reply_text)]
+                        )
                     )
                     break
                     
@@ -476,9 +486,11 @@ def handle_message(event):
                 
                 if retry_count == max_retries:
                     logging.error("達到最大重試次數")
-                    line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text="抱歉，處理您的訊息時發生錯誤，請稍後再試。")
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text="抱歉，處理您的訊息時發生錯誤，請稍後再試。")]
+                        )
                     )
                 else:
                     time.sleep(1)  # 等待一秒後重試
@@ -487,9 +499,11 @@ def handle_message(event):
         logging.error(f"處理訊息時發生未預期的錯誤: {str(e)}")
         logging.error(f"錯誤類型: {type(e).__name__}")
         logging.error(f"錯誤詳情: {traceback.format_exc()}")
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="抱歉，系統發生錯誤，請稍後再試。")
+        messaging_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text="抱歉，系統發生錯誤，請稍後再試。")]
+            )
         )
 
 @handler.add(MessageEvent, message=AudioMessageContent)
