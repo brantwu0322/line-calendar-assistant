@@ -12,7 +12,7 @@ from linebot.v3.webhooks import (
     TextMessageContent,
     AudioMessageContent
 )
-from linebot.v3.messaging import Configuration, MessagingApi
+from linebot.v3.messaging import Configuration, MessagingApi, ApiClient
 from linebot.v3.messaging.models import (
     TextMessage,
     ReplyMessageRequest,
@@ -52,11 +52,11 @@ channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.getenv('LINE_CHANNEL_SECRET')
 
 configuration = Configuration(
-    access_token=channel_access_token,
-    base_url="https://api.line.me"
+    access_token=channel_access_token
 )
+api_client = ApiClient(configuration)
 handler = WebhookHandler(channel_secret)
-messaging_api = MessagingApi(configuration)
+messaging_api = MessagingApi(api_client)
 
 # 添加保活機制
 def keep_alive():
