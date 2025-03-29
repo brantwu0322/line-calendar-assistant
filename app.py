@@ -132,10 +132,9 @@ def parse_event_text(text):
     
     try:
         # 使用 GPT-4 進行語意分析
-        client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         logger.info("正在調用 GPT-4 API...")
         
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
                 {
