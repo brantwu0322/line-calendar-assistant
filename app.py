@@ -1,7 +1,8 @@
 import os
 import logging
 import sys
-from datetime import datetime, timedelta, time
+import time
+from datetime import datetime, timedelta, time as datetime_time
 import re
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
@@ -323,7 +324,7 @@ def parse_event_text(text):
         
         logger.info(f"轉換後的時間：{hour}點{minute}分")
         
-        start_time = datetime.combine(target_date, time(hour, minute))
+        start_time = datetime.combine(target_date, datetime_time(hour, minute))
         end_time = start_time + timedelta(hours=1)
         
         logger.info(f"開始時間：{start_time}")
