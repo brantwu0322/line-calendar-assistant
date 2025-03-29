@@ -27,6 +27,7 @@ import tempfile
 import json
 import openai
 import requests
+import traceback
 
 # 設定日誌
 logging.basicConfig(
@@ -381,88 +382,115 @@ def create_calendar_event(event_data):
 
 @app.route("/callback", methods=['POST'])
 def callback():
-    """處理 LINE 訊息"""
-    logger.info("收到 LINE 回調請求")
     try:
         signature = request.headers['X-Line-Signature']
         body = request.get_data(as_text=True)
-        logger.debug(f"請求內容: {body}")
-        logger.debug(f"簽章: {signature}")
+        logging.info(f"收到 LINE 訊息: {body}")
         
         try:
             handler.handle(body, signature)
-            logger.info("成功處理 LINE 回調請求")
-        except InvalidSignatureError as e:
-            logger.error(f"無效的簽章: {str(e)}")
-            abort(400)
         except Exception as e:
-            logger.error(f"處理回調請求時發生錯誤: {str(e)}")
-            logger.exception("詳細錯誤資訊：")
-            abort(500)
-        
+            logging.error(f"處理訊息時發生錯誤: {str(e)}")
+            logging.error(f"錯誤類型: {type(e).__name__}")
+            logging.error(f"錯誤詳情: {traceback.format_exc()}")
+            return 'Error', 500
+            
         return 'OK'
     except Exception as e:
-        logger.error(f"處理請求時發生錯誤: {str(e)}")
-        logger.exception("詳細錯誤資訊：")
-        abort(500)
+        logging.error(f"回調處理時發生錯誤: {str(e)}")
+        logging.error(f"錯誤類型: {type(e).__name__}")
+        logging.error(f"錯誤詳情: {traceback.format_exc()}")
+        return 'Error', 500
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    """處理文字訊息"""
-    logger.info(f"收到文字訊息: {event.message.text}")
-    logger.debug(f"事件詳情: {event}")
-    
-    max_retries = 3
-    retry_count = 0
-    
-    while retry_count < max_retries:
-        try:
-            if event.message.text.lower() == "測試":
-                reply_text = "收到測試訊息！LINE Bot 正常運作中。"
-            else:
-                event_data = parse_event_text(event.message.text)
-                if event_data:
-                    success, result = create_calendar_event(event_data)
-                    if success:
-                        reply_text = f"已成功建立行程：{event_data['summary']}\n{result}"
-                    else:
-                        reply_text = f"建立行程失敗：{result}"
-                else:
-                    reply_text = "無法解析行程資訊。您可以這樣說：\n- 明天下午兩點跟客戶開會\n- 下週三早上九點去看牙醫\n- 每週五下午三點做瑜珈\n- 三天後下午四點半打籃球\n- 連續四個禮拜的週一早上九點開會"
-            
-            logger.info(f"準備回覆訊息: {reply_text}")
+    try:
+        logging.info(f"開始處理訊息: {event.message.text}")
+        retry_count = 0
+        max_retries = 3
+        
+        while retry_count < max_retries:
             try:
-                messaging_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessage(text=reply_text)]
+                # 檢查是否為測試訊息
+                if event.message.text.lower() == "測試":
+                    logging.info("收到測試訊息")
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="收到您的測試訊息！")
                     )
-                )
-                logger.info("成功發送回覆訊息")
-                break  # 成功發送後跳出重試循環
-            except Exception as e:
-                logger.error(f"發送回覆訊息時發生錯誤: {str(e)}")
-                logger.exception("詳細錯誤資訊：")
-                retry_count += 1
-                if retry_count >= max_retries:
-                    raise
-                continue
-        except Exception as e:
-            logger.error(f"處理訊息時發生錯誤: {str(e)}")
-            logger.exception("詳細錯誤資訊：")
-            retry_count += 1
-            if retry_count >= max_retries:
-                try:
-                    messaging_api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=event.reply_token,
-                            messages=[TextMessage(text=f"處理訊息時發生錯誤，請稍後再試。")]
+                    return
+                
+                # 檢查是否為行程相關訊息
+                if "行程" in event.message.text or "約會" in event.message.text or "開會" in event.message.text:
+                    logging.info("開始處理行程訊息")
+                    # 解析事件資訊
+                    event_info = parse_event_text(event.message.text)
+                    logging.info(f"解析結果: {event_info}")
+                    
+                    if event_info:
+                        logging.info("成功解析事件資訊，開始建立事件")
+                        # 建立事件
+                        event_id = create_calendar_event(event_info)
+                        if event_id:
+                            logging.info(f"成功建立事件，ID: {event_id}")
+                            line_bot_api.reply_message(
+                                event.reply_token,
+                                TextSendMessage(text=f"已成功建立行程：\n{event_info['summary']}\n時間：{event_info['start']} - {event_info['end']}")
+                            )
+                        else:
+                            logging.error("建立事件失敗")
+                            line_bot_api.reply_message(
+                                event.reply_token,
+                                TextSendMessage(text="抱歉，建立行程時發生錯誤。")
+                            )
+                    else:
+                        logging.error("無法解析事件資訊")
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            TextSendMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")
                         )
+                    break
+                else:
+                    logging.info("收到一般訊息，使用 GPT-4 處理")
+                    # 使用 GPT-4 處理一般訊息
+                    response = openai.ChatCompletion.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": "你是一個友善的 LINE 聊天機器人助手，請用簡短、親切的語氣回答。"},
+                            {"role": "user", "content": event.message.text}
+                        ]
                     )
-                except Exception as reply_error:
-                    logger.error(f"發送錯誤訊息時也發生錯誤: {str(reply_error)}")
-                    logger.exception("詳細錯誤資訊：")
-                break
+                    reply_text = response.choices[0].message.content
+                    logging.info(f"GPT-4 回應: {reply_text}")
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text=reply_text)
+                    )
+                    break
+                    
+            except Exception as e:
+                retry_count += 1
+                logging.error(f"處理訊息時發生錯誤 (嘗試 {retry_count}/{max_retries}): {str(e)}")
+                logging.error(f"錯誤類型: {type(e).__name__}")
+                logging.error(f"錯誤詳情: {traceback.format_exc()}")
+                
+                if retry_count == max_retries:
+                    logging.error("達到最大重試次數")
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="抱歉，處理您的訊息時發生錯誤，請稍後再試。")
+                    )
+                else:
+                    time.sleep(1)  # 等待一秒後重試
+                    
+    except Exception as e:
+        logging.error(f"處理訊息時發生未預期的錯誤: {str(e)}")
+        logging.error(f"錯誤類型: {type(e).__name__}")
+        logging.error(f"錯誤詳情: {traceback.format_exc()}")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="抱歉，系統發生錯誤，請稍後再試。")
+        )
 
 @handler.add(MessageEvent, message=AudioMessageContent)
 def handle_audio_message(event):
