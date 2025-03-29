@@ -52,7 +52,8 @@ channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.getenv('LINE_CHANNEL_SECRET')
 
 configuration = Configuration(
-    access_token=channel_access_token
+    access_token=channel_access_token,
+    base_url="https://api.line.me"
 )
 handler = WebhookHandler(channel_secret)
 messaging_api = MessagingApi(configuration)
