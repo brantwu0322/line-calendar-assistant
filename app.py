@@ -591,21 +591,35 @@ def handle_audio_message(event):
         # 下載語音檔案
         message_content = messaging_api.get_message_content(event.message.id)
         audio_data = message_content.content
+        logging.info(f"成功下載語音檔案，大小：{len(audio_data)} bytes")
         
         # 將音訊資料保存為臨時檔案
         with tempfile.NamedTemporaryFile(delete=False, suffix='.m4a') as temp_audio:
             temp_audio.write(audio_data)
             temp_audio_path = temp_audio.name
+            logging.info(f"已將音訊資料保存為臨時檔案：{temp_audio_path}")
         
-        # 使用 SpeechRecognition 處理語音
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(temp_audio_path) as source:
-            audio = recognizer.record(source)
-            text = recognizer.recognize_google(audio, language='zh-TW')
-            logging.info(f"語音轉換為文字：{text}")
+        try:
+            # 使用 SpeechRecognition 處理語音
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(temp_audio_path) as source:
+                logging.info("開始錄製音訊")
+                audio = recognizer.record(source)
+                logging.info("開始識別語音")
+                text = recognizer.recognize_google(audio, language='zh-TW')
+                logging.info(f"語音轉換為文字：{text}")
+        except Exception as e:
+            logging.error(f"語音識別過程發生錯誤：{str(e)}")
+            logging.exception("詳細錯誤資訊：")
+            raise
         
-        # 刪除臨時檔案
-        os.unlink(temp_audio_path)
+        finally:
+            # 確保臨時檔案被刪除
+            try:
+                os.unlink(temp_audio_path)
+                logging.info("已刪除臨時檔案")
+            except Exception as e:
+                logging.error(f"刪除臨時檔案時發生錯誤：{str(e)}")
         
         # 檢查是否為行程相關訊息
         time_keywords = ["點", "時", "早上", "上午", "下午", "晚上", "明天", "後天", "大後天", "下週", "下下週", "天後"]
