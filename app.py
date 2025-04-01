@@ -604,6 +604,8 @@ def handle_audio_message(event):
             recognizer = sr.Recognizer()
             with sr.AudioFile(temp_audio_path) as source:
                 logging.info("開始錄製音訊")
+                # 調整環境噪音
+                recognizer.adjust_for_ambient_noise(source, duration=0.5)
                 audio = recognizer.record(source)
                 logging.info("開始識別語音")
                 text = recognizer.recognize_google(audio, language='zh-TW')
