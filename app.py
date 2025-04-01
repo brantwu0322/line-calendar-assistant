@@ -124,18 +124,18 @@ def get_google_calendar_service():
             logger.info("嘗試從 token.json 讀取憑證")
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
                 logger.info("憑證已過期，正在重新整理")
-                creds.refresh(Request())
-            else:
+            creds.refresh(Request())
+        else:
                 logger.info("需要重新授權")
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-                creds = flow.run_local_server(port=0)
+            creds = flow.run_local_server(port=0)
             
             # 保存到文件
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
                 logger.info("已將新憑證保存到 token.json")
     
     try:
@@ -302,14 +302,22 @@ def parse_event_text(text):
             weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
             target_weekday = weekday_map[date_str[2]]
             current_weekday = today.weekday()
+            # 修改：確保是下週的日期
             days_ahead = (target_weekday - current_weekday + 7) % 7
+            if days_ahead == 0:  # 如果是同一天，則加7天
+                days_ahead = 7
             target_date = today + timedelta(days=days_ahead)
+            logger.info(f"計算下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，相差{days_ahead}天")
         elif date_str.startswith('下下週'):
             weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
             target_weekday = weekday_map[date_str[3]]
             current_weekday = today.weekday()
+            # 修改：確保是下下週的日期
             days_ahead = (target_weekday - current_weekday + 14) % 14
+            if days_ahead == 0:  # 如果是同一天，則加14天
+                days_ahead = 14
             target_date = today + timedelta(days=days_ahead)
+            logger.info(f"計算下下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，相差{days_ahead}天")
         elif date_str.startswith('連續'):
             # 解析連續週數
             count = int(date_str.split('個')[0].replace('連續', ''))
@@ -317,9 +325,13 @@ def parse_event_text(text):
             weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
             target_weekday = weekday_map[weekday_str]
             current_weekday = today.weekday()
+            # 修改：確保是下週的日期
             days_ahead = (target_weekday - current_weekday + 7) % 7
+            if days_ahead == 0:  # 如果是同一天，則加7天
+                days_ahead = 7
             target_date = today + timedelta(days=days_ahead)
             parsed_data['recurrence_count'] = count
+            logger.info(f"計算連續事件日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，相差{days_ahead}天")
         elif date_str.endswith('天後'):
             # 解析 X 天後
             days = int(date_str.replace('天後', ''))
@@ -379,7 +391,7 @@ def parse_event_text(text):
     except Exception as e:
         logger.error(f"解析文字時發生錯誤: {str(e)}")
         logger.exception("詳細錯誤資訊：")
-        return None
+    return None
 
 def create_calendar_event(event_data):
     """建立 Google Calendar 事件"""
@@ -414,12 +426,12 @@ def create_calendar_event(event_data):
 @app.route("/callback", methods=['POST'])
 def callback():
     try:
-        signature = request.headers['X-Line-Signature']
-        body = request.get_data(as_text=True)
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
         logging.info(f"收到 LINE 訊息: {body}")
-        
-        try:
-            handler.handle(body, signature)
+    
+    try:
+        handler.handle(body, signature)
         except Exception as e:
             logging.error(f"處理訊息時發生錯誤: {str(e)}")
             logging.error(f"錯誤類型: {type(e).__name__}")
@@ -481,8 +493,8 @@ def handle_message(event):
                                     reply_token=event.reply_token,
                                     messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
                                 )
-                            )
-                    else:
+            )
+        else:
                         logging.error("無法解析事件資訊")
                         messaging_api.reply_message(
                             ReplyMessageRequest(
@@ -595,7 +607,7 @@ def handle_audio_message(event):
         
         # 解析文字並建立行程
         event_data = parse_event_text(formatted_text)
-        if event_data:
+            if event_data:
             success, result = create_calendar_event(event_data)
             if success:
                 reply_text = f"已成功建立行程：{event_data['summary']}\n{result}"
@@ -609,7 +621,7 @@ def handle_audio_message(event):
                 reply_token=event.reply_token,
                 messages=[TextMessage(text=reply_text)]
             )
-        )
+                )
     except Exception as e:
         logger.error(f"處理語音訊息時發生錯誤: {str(e)}")
         logger.exception("詳細錯誤資訊：")
@@ -626,4 +638,4 @@ if __name__ == "__main__":
     logger.info(f"LINE_CHANNEL_SECRET: {os.getenv('LINE_CHANNEL_SECRET')[:10]}...")
     logger.info(f"GOOGLE_CALENDAR_ID: {os.getenv('GOOGLE_CALENDAR_ID')}")
     port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port) 
