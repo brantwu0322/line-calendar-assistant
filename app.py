@@ -480,10 +480,27 @@ def handle_message(event):
                         success, result = create_calendar_event(event_info)
                         if success:
                             logging.info(f"成功建立事件，結果: {result}")
+                            # 使用 GPT-4 生成回覆訊息
+                            response = openai.ChatCompletion.create(
+                                model="gpt-4",
+                                messages=[
+                                    {
+                                        "role": "system",
+                                        "content": "你是一個友善的 LINE 聊天機器人助手。當用戶設定行程時，請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
+                                    },
+                                    {
+                                        "role": "user",
+                                        "content": f"我已經幫用戶設定了以下行程：\n事件：{event_info['summary']}\n時間：{event_info['start']['dateTime']} - {event_info['end']['dateTime']}\n請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
+                                    }
+                                ],
+                                temperature=0.7
+                            )
+                            reply_text = response.choices[0].message.content
+                            logging.info(f"GPT-4 生成的回覆：{reply_text}")
                             messaging_api.reply_message(
                                 ReplyMessageRequest(
                                     reply_token=event.reply_token,
-                                    messages=[TextMessage(text=f"已成功建立行程：\n{event_info['summary']}\n時間：{event_info['start']['dateTime']} - {event_info['end']['dateTime']}")]
+                                    messages=[TextMessage(text=reply_text)]
                                 )
                             )
                         else:
