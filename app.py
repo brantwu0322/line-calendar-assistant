@@ -587,6 +587,8 @@ def handle_message(event):
 @handler.add(MessageEvent, message=AudioMessageContent)
 def handle_audio_message(event):
     """處理語音訊息"""
+    temp_audio_path = None
+    wav_path = None
     try:
         # 下載音訊檔案
         message_content = messaging_api.get_message_content(event.message.id)
@@ -629,11 +631,77 @@ def handle_audio_message(event):
 
         # 處理識別出的文字
         try:
-            response = process_message(text)
-            messaging_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=response)
-            )
+            # 檢查是否為行程相關訊息
+            time_keywords = ["點", "時", "早上", "上午", "下午", "晚上", "明天", "後天", "大後天", "下週", "下下週", "天後"]
+            if any(keyword in text for keyword in time_keywords):
+                logging.info("開始處理行程訊息")
+                # 解析事件資訊
+                event_info = parse_event_text(text)
+                logging.info(f"解析結果: {event_info}")
+                
+                if event_info:
+                    logging.info("成功解析事件資訊，開始建立事件")
+                    # 建立事件
+                    success, result = create_calendar_event(event_info)
+                    if success:
+                        logging.info(f"成功建立事件，結果: {result}")
+                        # 使用 GPT-4 生成回覆訊息
+                        response = openai.ChatCompletion.create(
+                            model="gpt-4",
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": "你是一個友善的 LINE 聊天機器人助手。當用戶設定行程時，請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
+                                },
+                                {
+                                    "role": "user",
+                                    "content": f"我已經幫用戶設定了以下行程：\n事件：{event_info['summary']}\n時間：{event_info['start']['dateTime']} - {event_info['end']['dateTime']}\n請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
+                                }
+                            ],
+                            temperature=0.7
+                        )
+                        reply_text = response.choices[0].message.content
+                        logging.info(f"GPT-4 生成的回覆：{reply_text}")
+                        messaging_api.reply_message(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text=reply_text)]
+                            )
+                        )
+                    else:
+                        logging.error("建立事件失敗")
+                        messaging_api.reply_message(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
+                            )
+                        )
+                else:
+                    logging.error("無法解析事件資訊")
+                    messaging_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")]
+                        )
+                    )
+            else:
+                logging.info("收到一般語音訊息，使用 GPT-4 處理")
+                # 使用 GPT-4 處理一般訊息
+                response = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "你是一個友善的 LINE 聊天機器人助手，請用簡短、親切的語氣回答。"},
+                        {"role": "user", "content": text}
+                    ]
+                )
+                reply_text = response.choices[0].message.content
+                logging.info(f"GPT-4 回應: {reply_text}")
+                messaging_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=reply_text)]
+                    )
+                )
         except Exception as e:
             logging.error(f"處理識別文字時發生錯誤：{str(e)}")
             raise Exception("處理語音內容失敗")
@@ -641,8 +709,10 @@ def handle_audio_message(event):
     except Exception as e:
         logging.error(f"處理語音訊息時發生錯誤：{str(e)}")
         messaging_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="抱歉，處理語音訊息時發生錯誤。請稍後再試，或改用文字訊息。")
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text="抱歉，處理語音訊息時發生錯誤。請稍後再試，或改用文字訊息。")]
+            )
         )
     finally:
         # 清理臨時檔案
