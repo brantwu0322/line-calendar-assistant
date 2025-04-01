@@ -602,19 +602,31 @@ def handle_audio_message(event):
         temp_audio_path = None
         wav_path = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.m4a') as temp_audio:
+            # 使用唯一的臨時檔案名稱
+            temp_audio_path = tempfile.mktemp(suffix='.m4a')
+            wav_path = temp_audio_path.replace('.m4a', '.wav')
+            
+            # 寫入音訊資料
+            with open(temp_audio_path, 'wb') as temp_audio:
                 temp_audio.write(audio_data)
-                temp_audio_path = temp_audio.name
-                logging.info(f"已將音訊資料保存為臨時檔案：{temp_audio_path}")
+            logging.info(f"已將音訊資料保存為臨時檔案：{temp_audio_path}")
             
             # 使用 pydub 轉換音訊格式
             try:
-                audio = AudioSegment.from_file(temp_audio_path, format="m4a")
-                wav_path = temp_audio_path.replace('.m4a', '.wav')
+                logging.info("開始轉換音訊格式")
+                audio = AudioSegment.from_file(temp_audio_path)
+                logging.info(f"成功讀取音訊檔案，長度：{len(audio)}ms")
+                
+                # 設定音訊參數
+                audio = audio.set_frame_rate(16000)
+                audio = audio.set_channels(1)
+                
+                # 匯出為 WAV 格式
                 audio.export(wav_path, format="wav")
                 logging.info(f"已將音訊轉換為 WAV 格式：{wav_path}")
             except Exception as e:
                 logging.error(f"轉換音訊格式時發生錯誤：{str(e)}")
+                logging.exception("詳細錯誤資訊：")
                 raise
             
             # 使用 SpeechRecognition 處理語音
@@ -630,6 +642,7 @@ def handle_audio_message(event):
                     logging.info(f"語音轉換為文字：{text}")
             except Exception as e:
                 logging.error(f"語音識別過程發生錯誤：{str(e)}")
+                logging.exception("詳細錯誤資訊：")
                 raise
                 
         finally:
@@ -637,9 +650,10 @@ def handle_audio_message(event):
             try:
                 if temp_audio_path and os.path.exists(temp_audio_path):
                     os.unlink(temp_audio_path)
+                    logging.info(f"已刪除臨時音訊檔案：{temp_audio_path}")
                 if wav_path and os.path.exists(wav_path):
                     os.unlink(wav_path)
-                logging.info("已刪除臨時檔案")
+                    logging.info(f"已刪除臨時 WAV 檔案：{wav_path}")
             except Exception as e:
                 logging.error(f"刪除臨時檔案時發生錯誤：{str(e)}")
         
