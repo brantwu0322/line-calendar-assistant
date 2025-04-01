@@ -32,6 +32,7 @@ import traceback
 from pydub import AudioSegment
 from linebot import LineBotApi
 from linebot.models import TextMessage, AudioMessage
+import opencc
 
 # 設定日誌
 logging.basicConfig(
@@ -61,6 +62,9 @@ configuration = Configuration(
 api_client = ApiClient(configuration)
 handler = WebhookHandler(channel_secret)
 messaging_api = MessagingApi(api_client)
+
+# 初始化簡體轉繁體轉換器
+converter = opencc.OpenCC('s2twp')
 
 # 添加保活機制
 def keep_alive():
@@ -624,7 +628,9 @@ def handle_audio_message(event):
             with sr.AudioFile(wav_path) as source:
                 audio_data = recognizer.record(source)
                 text = recognizer.recognize_google(audio_data, language='zh-TW')
-                logging.info(f"成功識別語音內容：{text}")
+                # 將簡體中文轉換為繁體中文
+                text = converter.convert(text)
+                logging.info(f"成功識別語音內容（繁體）：{text}")
         except sr.UnknownValueError:
             logging.error("無法識別語音內容")
             raise Exception("無法識別語音內容")
