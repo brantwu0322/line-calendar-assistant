@@ -586,174 +586,73 @@ def handle_message(event):
 
 @handler.add(MessageEvent, message=AudioMessageContent)
 def handle_audio_message(event):
+    """處理語音訊息"""
     try:
-        logging.info("開始處理語音訊息")
+        # 下載音訊檔案
+        message_content = messaging_api.get_message_content(event.message.id)
+        temp_audio_path = tempfile.mktemp(suffix='.m4a')
+        wav_path = tempfile.mktemp(suffix='.wav')
         
-        # 下載語音檔案
         try:
-            message_content = messaging_api.get_message_content(event.message.id)
-            audio_data = message_content.content
-            logging.info(f"成功下載語音檔案，大小：{len(audio_data)} bytes")
+            with open(temp_audio_path, 'wb') as f:
+                for chunk in message_content.iter_content():
+                    f.write(chunk)
+            logging.info(f"成功下載音訊檔案，大小：{os.path.getsize(temp_audio_path)} bytes")
         except Exception as e:
-            logging.error(f"下載語音檔案時發生錯誤：{str(e)}")
-            raise
-        
-        # 將音訊資料保存為臨時檔案
-        temp_audio_path = None
-        wav_path = None
+            logging.error(f"下載音訊檔案時發生錯誤：{str(e)}")
+            raise Exception("下載音訊檔案失敗")
+
         try:
-            # 使用唯一的臨時檔案名稱
-            temp_audio_path = tempfile.mktemp(suffix='.m4a')
-            wav_path = temp_audio_path.replace('.m4a', '.wav')
-            
-            # 寫入音訊資料
-            with open(temp_audio_path, 'wb') as temp_audio:
-                temp_audio.write(audio_data)
-            logging.info(f"已將音訊資料保存為臨時檔案：{temp_audio_path}")
-            
             # 使用 pydub 轉換音訊格式
-            try:
-                logging.info("開始轉換音訊格式")
-                audio = AudioSegment.from_file(temp_audio_path)
-                logging.info(f"成功讀取音訊檔案，長度：{len(audio)}ms")
-                
-                # 設定音訊參數
-                audio = audio.set_frame_rate(16000)
-                audio = audio.set_channels(1)
-                
-                # 匯出為 WAV 格式
-                audio.export(wav_path, format="wav")
-                logging.info(f"已將音訊轉換為 WAV 格式：{wav_path}")
-            except Exception as e:
-                logging.error(f"轉換音訊格式時發生錯誤：{str(e)}")
-                logging.exception("詳細錯誤資訊：")
-                raise
-            
-            # 使用 SpeechRecognition 處理語音
-            try:
-                recognizer = sr.Recognizer()
-                with sr.AudioFile(wav_path) as source:
-                    logging.info("開始錄製音訊")
-                    # 調整環境噪音
-                    recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                    audio = recognizer.record(source)
-                    logging.info("開始識別語音")
-                    text = recognizer.recognize_google(audio, language='zh-TW')
-                    logging.info(f"語音轉換為文字：{text}")
-            except Exception as e:
-                logging.error(f"語音識別過程發生錯誤：{str(e)}")
-                logging.exception("詳細錯誤資訊：")
-                raise
-                
-        finally:
-            # 確保臨時檔案被刪除
-            try:
-                if temp_audio_path and os.path.exists(temp_audio_path):
-                    os.unlink(temp_audio_path)
-                    logging.info(f"已刪除臨時音訊檔案：{temp_audio_path}")
-                if wav_path and os.path.exists(wav_path):
-                    os.unlink(wav_path)
-                    logging.info(f"已刪除臨時 WAV 檔案：{wav_path}")
-            except Exception as e:
-                logging.error(f"刪除臨時檔案時發生錯誤：{str(e)}")
-        
-        # 檢查是否為行程相關訊息
-        time_keywords = ["點", "時", "早上", "上午", "下午", "晚上", "明天", "後天", "大後天", "下週", "下下週", "天後"]
-        if any(keyword in text for keyword in time_keywords):
-            logging.info("開始處理行程訊息")
-            # 解析事件資訊
-            event_info = parse_event_text(text)
-            logging.info(f"解析結果: {event_info}")
-            
-            if event_info:
-                logging.info("成功解析事件資訊，開始建立事件")
-                # 建立事件
-                success, result = create_calendar_event(event_info)
-                if success:
-                    logging.info(f"成功建立事件，結果: {result}")
-                    # 使用 GPT-4 生成回覆訊息
-                    response = openai.ChatCompletion.create(
-                        model="gpt-4",
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": "你是一個友善的 LINE 聊天機器人助手。當用戶設定行程時，請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
-                            },
-                            {
-                                "role": "user",
-                                "content": f"我已經幫用戶設定了以下行程：\n事件：{event_info['summary']}\n時間：{event_info['start']['dateTime']} - {event_info['end']['dateTime']}\n請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
-                            }
-                        ],
-                        temperature=0.7
-                    )
-                    reply_text = response.choices[0].message.content
-                    logging.info(f"GPT-4 生成的回覆：{reply_text}")
-                    messaging_api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=event.reply_token,
-                            messages=[TextMessage(text=reply_text)]
-                        )
-                    )
-                else:
-                    logging.error("建立事件失敗")
-                    messaging_api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=event.reply_token,
-                            messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
-                        )
-                    )
-            else:
-                logging.error("無法解析事件資訊")
-                messaging_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")]
-                    )
-                )
-        else:
-            logging.info("收到一般語音訊息，使用 GPT-4 處理")
-            # 使用 GPT-4 處理一般訊息
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "你是一個友善的 LINE 聊天機器人助手，請用簡短、親切的語氣回答。"},
-                    {"role": "user", "content": text}
-                ]
-            )
-            reply_text = response.choices[0].message.content
-            logging.info(f"GPT-4 回應: {reply_text}")
+            audio = AudioSegment.from_file(temp_audio_path)
+            audio = audio.set_frame_rate(16000)
+            audio = audio.set_channels(1)
+            audio.export(wav_path, format="wav")
+            logging.info(f"成功轉換音訊格式：{wav_path}")
+        except Exception as e:
+            logging.error(f"轉換音訊格式時發生錯誤：{str(e)}")
+            raise Exception("轉換音訊格式失敗")
+
+        try:
+            # 使用 SpeechRecognition 進行語音識別
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(wav_path) as source:
+                audio_data = recognizer.record(source)
+                text = recognizer.recognize_google(audio_data, language='zh-TW')
+                logging.info(f"成功識別語音內容：{text}")
+        except sr.UnknownValueError:
+            logging.error("無法識別語音內容")
+            raise Exception("無法識別語音內容")
+        except sr.RequestError as e:
+            logging.error(f"語音識別服務發生錯誤：{str(e)}")
+            raise Exception("語音識別服務暫時無法使用")
+
+        # 處理識別出的文字
+        try:
+            response = process_message(text)
             messaging_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[TextMessage(text=reply_text)]
-                )
+                event.reply_token,
+                TextSendMessage(text=response)
             )
-            
-    except sr.UnknownValueError:
-        logging.error("無法識別語音內容")
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text="抱歉，我無法識別您的語音內容。請再說一次，或改用文字訊息。")]
-            )
-        )
-    except sr.RequestError as e:
-        logging.error(f"語音識別服務發生錯誤：{str(e)}")
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text="抱歉，語音識別服務暫時無法使用。請稍後再試，或改用文字訊息。")]
-            )
-        )
+        except Exception as e:
+            logging.error(f"處理識別文字時發生錯誤：{str(e)}")
+            raise Exception("處理語音內容失敗")
+
     except Exception as e:
         logging.error(f"處理語音訊息時發生錯誤：{str(e)}")
-        logging.exception("詳細錯誤資訊：")
         messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text="抱歉，處理語音訊息時發生錯誤。請稍後再試，或改用文字訊息。")]
-            )
+            event.reply_token,
+            TextSendMessage(text="抱歉，處理語音訊息時發生錯誤。請稍後再試，或改用文字訊息。")
         )
+    finally:
+        # 清理臨時檔案
+        for file_path in [temp_audio_path, wav_path]:
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    logging.info(f"成功刪除臨時檔案：{file_path}")
+                except Exception as e:
+                    logging.error(f"刪除臨時檔案時發生錯誤：{str(e)}")
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
