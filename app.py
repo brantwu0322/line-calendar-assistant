@@ -30,6 +30,8 @@ import openai
 import requests
 import traceback
 from pydub import AudioSegment
+from linebot import LineBotApi
+from linebot.models import TextMessage, AudioMessage
 
 # 設定日誌
 logging.basicConfig(
@@ -52,6 +54,7 @@ app = Flask(__name__)
 channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.getenv('LINE_CHANNEL_SECRET')
 
+line_bot_api = LineBotApi(channel_access_token)
 configuration = Configuration(
     access_token=channel_access_token
 )
@@ -591,7 +594,7 @@ def handle_audio_message(event):
     wav_path = None
     try:
         # 下載音訊檔案
-        message_content = messaging_api.get_message_content(event.message.id)
+        message_content = line_bot_api.get_message_content(event.message.id)
         temp_audio_path = tempfile.mktemp(suffix='.m4a')
         wav_path = tempfile.mktemp(suffix='.wav')
         
