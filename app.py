@@ -123,20 +123,20 @@ def get_google_calendar_service():
         if os.path.exists('token.json'):
             logger.info("嘗試從 token.json 讀取憑證")
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        
+    
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-                logger.info("憑證已過期，正在重新整理")
+            logger.info("憑證已過期，正在重新整理")
             creds.refresh(Request())
         else:
-                logger.info("需要重新授權")
-                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            logger.info("需要重新授權")
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
-            
-            # 保存到文件
+        
+        # 保存到文件
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
-                logger.info("已將新憑證保存到 token.json")
+            logger.info("已將新憑證保存到 token.json")
     
     try:
         service = build('calendar', 'v3', credentials=creds)
@@ -426,12 +426,12 @@ def create_calendar_event(event_data):
 @app.route("/callback", methods=['POST'])
 def callback():
     try:
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
+        signature = request.headers['X-Line-Signature']
+        body = request.get_data(as_text=True)
         logging.info(f"收到 LINE 訊息: {body}")
     
-    try:
-        handler.handle(body, signature)
+        try:
+            handler.handle(body, signature)
         except Exception as e:
             logging.error(f"處理訊息時發生錯誤: {str(e)}")
             logging.error(f"錯誤類型: {type(e).__name__}")
@@ -493,8 +493,8 @@ def handle_message(event):
                                     reply_token=event.reply_token,
                                     messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
                                 )
-            )
-        else:
+                            )
+                    else:
                         logging.error("無法解析事件資訊")
                         messaging_api.reply_message(
                             ReplyMessageRequest(
@@ -607,7 +607,7 @@ def handle_audio_message(event):
         
         # 解析文字並建立行程
         event_data = parse_event_text(formatted_text)
-            if event_data:
+        if event_data:
             success, result = create_calendar_event(event_data)
             if success:
                 reply_text = f"已成功建立行程：{event_data['summary']}\n{result}"
@@ -621,7 +621,7 @@ def handle_audio_message(event):
                 reply_token=event.reply_token,
                 messages=[TextMessage(text=reply_text)]
             )
-                )
+        )
     except Exception as e:
         logger.error(f"處理語音訊息時發生錯誤: {str(e)}")
         logger.exception("詳細錯誤資訊：")
