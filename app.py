@@ -29,6 +29,7 @@ import json
 import openai
 import requests
 import traceback
+from pydub import AudioSegment
 
 # 設定日誌
 logging.basicConfig(
@@ -600,9 +601,15 @@ def handle_audio_message(event):
             logging.info(f"已將音訊資料保存為臨時檔案：{temp_audio_path}")
         
         try:
+            # 使用 pydub 轉換音訊格式
+            audio = AudioSegment.from_file(temp_audio_path, format="m4a")
+            wav_path = temp_audio_path.replace('.m4a', '.wav')
+            audio.export(wav_path, format="wav")
+            logging.info(f"已將音訊轉換為 WAV 格式：{wav_path}")
+            
             # 使用 SpeechRecognition 處理語音
             recognizer = sr.Recognizer()
-            with sr.AudioFile(temp_audio_path) as source:
+            with sr.AudioFile(wav_path) as source:
                 logging.info("開始錄製音訊")
                 # 調整環境噪音
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
@@ -619,6 +626,7 @@ def handle_audio_message(event):
             # 確保臨時檔案被刪除
             try:
                 os.unlink(temp_audio_path)
+                os.unlink(wav_path)
                 logging.info("已刪除臨時檔案")
             except Exception as e:
                 logging.error(f"刪除臨時檔案時發生錯誤：{str(e)}")
