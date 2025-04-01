@@ -454,10 +454,12 @@ def handle_message(event):
                     return
                 
                 # 檢查是否為行程相關訊息
-                if "行程" in event.message.text or "約會" in event.message.text or "開會" in event.message.text:
+                text = event.message.text
+                time_keywords = ["點", "時", "早上", "上午", "下午", "晚上", "明天", "後天", "大後天", "下週", "下下週", "天後"]
+                if any(keyword in text for keyword in time_keywords):
                     logging.info("開始處理行程訊息")
                     # 解析事件資訊
-                    event_info = parse_event_text(event.message.text)
+                    event_info = parse_event_text(text)
                     logging.info(f"解析結果: {event_info}")
                     
                     if event_info:
