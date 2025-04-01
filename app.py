@@ -183,11 +183,12 @@ def parse_event_text(text):
                        - "半" 表示 30 分
                     
                     2. 日期解析：
+                       - "今天" 指今天
                        - "明天" 指明天
                        - "後天" 指後天
                        - "大後天" 指大後天
-                       - "下週X" 指下週的某一天
-                       - "下下週X" 指下下週的某一天
+                       - "下週X" 指下週的某一天（例如：今天是週一，說"下週三"就是指下週三）
+                       - "下下週X" 指下下週的某一天（例如：今天是週一，說"下下週三"就是指下下週三）
                        - "連續X個週Y" 指連續X週的週Y
                        - "X天後" 指X天後
                     
@@ -302,24 +303,36 @@ def parse_event_text(text):
             weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
             target_weekday = weekday_map[date_str[2]]
             current_weekday = today.weekday()
-            # 修改：確保是下週的日期
-            days_ahead = target_weekday - current_weekday
-            if days_ahead <= 0:  # 如果目標日期在本週或之前，則加7天到下週
-                days_ahead += 7
-            target_date = today + timedelta(days=days_ahead)
-            logger.info(f"計算下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，相差{days_ahead}天")
+            
+            # 先找到下一個目標週幾
+            days_until_next = (target_weekday - current_weekday) % 7
+            if days_until_next == 0:
+                days_until_next = 7
+            
+            # 計算到下週的天數
+            days_to_next_week = 7 - current_weekday
+            
+            # 確保是下週的日期
+            target_date = today + timedelta(days=days_to_next_week + target_weekday)
+            
+            logger.info(f"計算下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，到下週需要{days_to_next_week}天")
         elif date_str.startswith('下下週'):
             weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
             target_weekday = weekday_map[date_str[3]]
             current_weekday = today.weekday()
-            # 修改：確保是下下週的日期
-            days_ahead = target_weekday - current_weekday
-            if days_ahead <= 0:  # 如果目標日期在本週或之前，則加14天到下下週
-                days_ahead += 14
-            elif days_ahead <= 7:  # 如果目標日期在下週，則加7天到下下週
-                days_ahead += 7
-            target_date = today + timedelta(days=days_ahead)
-            logger.info(f"計算下下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，相差{days_ahead}天")
+            
+            # 先找到下一個目標週幾
+            days_until_next = (target_weekday - current_weekday) % 7
+            if days_until_next == 0:
+                days_until_next = 7
+            
+            # 計算到下下週的天數
+            days_to_next_next_week = 14 - current_weekday
+            
+            # 確保是下下週的日期
+            target_date = today + timedelta(days=days_to_next_next_week + target_weekday)
+            
+            logger.info(f"計算下下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，到下下週需要{days_to_next_next_week}天")
         elif date_str.startswith('連續'):
             # 解析連續週數
             count = int(date_str.split('個')[0].replace('連續', ''))
