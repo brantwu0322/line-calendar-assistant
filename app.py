@@ -93,38 +93,59 @@ CALENDAR_ID = os.getenv('GOOGLE_CALENDAR_ID')
 
 def get_google_calendar_service():
     """取得 Google Calendar API 服務"""
+    logger.info("開始建立 Google Calendar 服務")
     creds = None
     
     # 從環境變數獲取憑證
     if os.getenv('GOOGLE_CALENDAR_CREDENTIALS') and os.getenv('GOOGLE_CALENDAR_TOKEN'):
-        # 從環境變數讀取憑證
-        creds_info = json.loads(os.getenv('GOOGLE_CALENDAR_CREDENTIALS'))
-        token_info = json.loads(os.getenv('GOOGLE_CALENDAR_TOKEN'))
-        
-        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
-        
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-                # 更新環境變數中的 token
-                os.environ['GOOGLE_CALENDAR_TOKEN'] = json.dumps(json.loads(creds.to_json()))
+        logger.info("從環境變數讀取 Google Calendar 憑證")
+        try:
+            # 從環境變數讀取憑證
+            creds_info = json.loads(os.getenv('GOOGLE_CALENDAR_CREDENTIALS'))
+            token_info = json.loads(os.getenv('GOOGLE_CALENDAR_TOKEN'))
+            
+            creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+            logger.info("成功從環境變數建立憑證")
+            
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    logger.info("憑證已過期，正在重新整理")
+                    creds.refresh(Request())
+                    # 更新環境變數中的 token
+                    os.environ['GOOGLE_CALENDAR_TOKEN'] = json.dumps(json.loads(creds.to_json()))
+                    logger.info("已更新環境變數中的 token")
+        except Exception as e:
+            logger.error(f"從環境變數讀取憑證時發生錯誤: {str(e)}")
+            logger.exception("詳細錯誤資訊：")
     else:
+        logger.info("環境變數中沒有 Google Calendar 憑證")
         # 如果環境變數中沒有憑證，嘗試從文件讀取
         if os.path.exists('token.json'):
+            logger.info("嘗試從 token.json 讀取憑證")
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
+                logger.info("憑證已過期，正在重新整理")
                 creds.refresh(Request())
             else:
+                logger.info("需要重新授權")
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
             
             # 保存到文件
             with open('token.json', 'w') as token:
                 token.write(creds.to_json())
+                logger.info("已將新憑證保存到 token.json")
     
-    return build('calendar', 'v3', credentials=creds)
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        logger.info("成功建立 Google Calendar 服務")
+        return service
+    except Exception as e:
+        logger.error(f"建立 Google Calendar 服務時發生錯誤: {str(e)}")
+        logger.exception("詳細錯誤資訊：")
+        raise
 
 def parse_event_text(text):
     """解析文字中的行程資訊"""
@@ -363,7 +384,11 @@ def parse_event_text(text):
 def create_calendar_event(event_data):
     """建立 Google Calendar 事件"""
     try:
+        logger.info("開始建立 Google Calendar 事件")
+        logger.info(f"事件資料：{json.dumps(event_data, ensure_ascii=False)}")
+        
         service = get_google_calendar_service()
+        logger.info("成功取得 Google Calendar 服務")
         
         event = {
             'summary': event_data['summary'],
@@ -373,12 +398,17 @@ def create_calendar_event(event_data):
         
         if 'recurrence' in event_data:
             event['recurrence'] = event_data['recurrence']
+            logger.info(f"設定重複規則：{event_data['recurrence']}")
+        
+        logger.info(f"準備建立事件：{json.dumps(event, ensure_ascii=False)}")
+        logger.info(f"使用的行事曆 ID：{CALENDAR_ID}")
         
         event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
         logger.info(f"成功建立事件: {event.get('htmlLink')}")
         return True, event.get('htmlLink')
     except Exception as e:
         logger.error(f"建立事件時發生錯誤: {str(e)}")
+        logger.exception("詳細錯誤資訊：")
         return False, str(e)
 
 @app.route("/callback", methods=['POST'])
