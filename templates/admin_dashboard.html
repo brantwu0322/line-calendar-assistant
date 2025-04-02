@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LINE 行事曆助手 - 管理後台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .user-card {
+            margin-bottom: 1rem;
+        }
+        .status-badge {
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">LINE 行事曆助手 - 管理後台</a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="{{ url_for('admin_logout') }}">登出</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h2>使用者管理</h2>
+        <div class="row">
+            {% for user in users %}
+            <div class="col-md-6 col-lg-4">
+                <div class="card user-card">
+                    <div class="card-body">
+                        <h5 class="card-title">使用者 ID: {{ user[0] }}</h5>
+                        <p class="card-text">
+                            <span class="badge {% if user[1] == 'premium' %}bg-success{% else %}bg-secondary{% endif %} status-badge">
+                                {{ user[1] }}
+                            </span>
+                        </p>
+                        <p class="card-text">
+                            <small class="text-muted">
+                                到期日: {{ user[2] or '未訂閱' }}<br>
+                                註冊日: {{ user[3] }}<br>
+                                訂單數: {{ user[4] }}
+                            </small>
+                        </p>
+                        <button class="btn btn-danger btn-sm" onclick="removeUser('{{ user[0] }}')">
+                            移除使用者
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function removeUser(lineUserId) {
+            if (confirm('確定要移除這個使用者嗎？此操作無法復原。')) {
+                fetch(`/admin/user/${lineUserId}/remove`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.text())
+                .then(result => {
+                    alert(result);
+                    if (result === '成功移除使用者') {
+                        location.reload();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('移除使用者時發生錯誤');
+                });
+            }
+        }
+    </script>
+</body>
+</html> 

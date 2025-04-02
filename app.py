@@ -83,10 +83,23 @@ def require_authorization(func):
     @wraps(func)
     def wrapper(event, *args, **kwargs):
         line_user_id = event.source.user_id
-        service, error = get_google_calendar_service(line_user_id)
         
+        # 檢查使用者訂閱狀態
+        user_status = get_user_status(line_user_id)
+        if not user_status or user_status['status'] == 'free':
+            # 如果使用者未訂閱，提供訂閱連結
+            subscribe_url = url_for('subscribe', line_user_id=line_user_id, _external=True)
+            messaging_api.reply_message_with_http_info(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=f"請先完成訂閱以使用完整功能：\n{subscribe_url}")]
+                )
+            )
+            return
+        
+        # 檢查 Google Calendar 授權
+        service, error = get_google_calendar_service(line_user_id)
         if error:
-            # 如果未授權，提供授權連結
             auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
             messaging_api.reply_message_with_http_info(
                 ReplyMessageRequest(
@@ -110,8 +123,30 @@ def init_db():
         
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
+        
+        # 建立使用者表
         c.execute('''CREATE TABLE IF NOT EXISTS users
-                     (line_user_id TEXT PRIMARY KEY, credentials TEXT)''')
+                     (line_user_id TEXT PRIMARY KEY,
+                      credentials TEXT,
+                      subscription_status TEXT DEFAULT 'free',
+                      subscription_end_date TEXT,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        # 建立管理員表
+        c.execute('''CREATE TABLE IF NOT EXISTS admins
+                     (username TEXT PRIMARY KEY,
+                      password_hash TEXT,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        # 建立訂單表
+        c.execute('''CREATE TABLE IF NOT EXISTS orders
+                     (order_id TEXT PRIMARY KEY,
+                      line_user_id TEXT,
+                      amount INTEGER,
+                      status TEXT,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                      FOREIGN KEY (line_user_id) REFERENCES users(line_user_id))''')
+        
         conn.commit()
         conn.close()
         logger.info("Database initialized successfully")
@@ -779,6 +814,128 @@ def oauth2callback(line_user_id):
     save_user_credentials(line_user_id, credentials)
     
     return "授權成功！請回到 LINE 繼續使用。"
+
+# 管理員後台路由
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        # 驗證管理員帳號密碼
+        if verify_admin(username, password):
+            session['admin'] = username
+            return redirect(url_for('admin_dashboard'))
+        return '登入失敗', 401
+    
+    return '''
+        <form method="post">
+            <input type="text" name="username" placeholder="管理員帳號">
+            <input type="password" name="password" placeholder="密碼">
+            <button type="submit">登入</button>
+        </form>
+    '''
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if 'admin' not in session:
+        return redirect(url_for('admin_login'))
+    
+    # 獲取所有使用者資訊
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''SELECT u.line_user_id, u.subscription_status, u.subscription_end_date,
+                        u.created_at, COUNT(o.order_id) as order_count
+                 FROM users u
+                 LEFT JOIN orders o ON u.line_user_id = o.line_user_id
+                 GROUP BY u.line_user_id''')
+    users = c.fetchall()
+    conn.close()
+    
+    return render_template('admin_dashboard.html', users=users)
+
+@app.route('/admin/user/<line_user_id>/remove', methods=['POST'])
+def remove_user(line_user_id):
+    if 'admin' not in session:
+        return '未授權', 401
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('DELETE FROM users WHERE line_user_id = ?', (line_user_id,))
+        conn.commit()
+        conn.close()
+        return '成功移除使用者', 200
+    except Exception as e:
+        logger.error(f"Error removing user: {str(e)}")
+        return '移除使用者失敗', 500
+
+# 訂閱相關路由
+@app.route('/subscribe/<line_user_id>')
+def subscribe(line_user_id):
+    """處理訂閱請求"""
+    # 這裡可以整合金流系統（如綠界、藍新等）
+    # 目前先模擬訂閱流程
+    order_id = create_order(line_user_id, 299)  # 假設月費 299 元
+    
+    if order_id:
+        # 這裡應該導向金流系統的付款頁面
+        # 目前先模擬付款成功
+        update_user_subscription(line_user_id, 'premium', 
+                               (datetime.now() + timedelta(days=30)).isoformat())
+        return "訂閱成功！請回到 LINE 繼續使用。"
+    return "訂閱失敗，請稍後再試。"
+
+def get_user_status(line_user_id):
+    """獲取使用者狀態"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''SELECT subscription_status, subscription_end_date 
+                     FROM users WHERE line_user_id = ?''', (line_user_id,))
+        result = c.fetchone()
+        conn.close()
+        
+        if result:
+            return {
+                'status': result[0],
+                'end_date': result[1]
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Error getting user status: {str(e)}")
+        return None
+
+def update_user_subscription(line_user_id, status, end_date):
+    """更新使用者訂閱狀態"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''UPDATE users 
+                     SET subscription_status = ?, subscription_end_date = ?
+                     WHERE line_user_id = ?''', (status, end_date, line_user_id))
+        conn.commit()
+        conn.close()
+        logger.info(f"Updated subscription for user: {line_user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating user subscription: {str(e)}")
+        return False
+
+def create_order(line_user_id, amount):
+    """建立訂單"""
+    try:
+        order_id = f"ORDER_{int(time.time())}_{line_user_id[:8]}"
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''INSERT INTO orders (order_id, line_user_id, amount, status)
+                     VALUES (?, ?, ?, ?)''', (order_id, line_user_id, amount, 'pending'))
+        conn.commit()
+        conn.close()
+        return order_id
+    except Exception as e:
+        logger.error(f"Error creating order: {str(e)}")
+        return None
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
