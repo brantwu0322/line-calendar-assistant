@@ -671,27 +671,21 @@ def handle_audio_message(event):
                         )
                         reply_text = response.choices[0].message.content
                         logging.info(f"GPT-4 生成的回覆：{reply_text}")
-                        messaging_api.reply_message(
-                            ReplyMessageRequest(
-                                reply_token=event.reply_token,
-                                messages=[TextMessage(text=reply_text)]
-                            )
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            TextMessage(text=reply_text)
                         )
                     else:
                         logging.error("建立事件失敗")
-                        messaging_api.reply_message(
-                            ReplyMessageRequest(
-                                reply_token=event.reply_token,
-                                messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
-                            )
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            TextMessage(text="抱歉，建立行程時發生錯誤。")
                         )
                 else:
                     logging.error("無法解析事件資訊")
-                    messaging_api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=event.reply_token,
-                            messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")]
-                        )
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")
                     )
             else:
                 logging.info("收到一般語音訊息，使用 GPT-4 處理")
@@ -705,11 +699,9 @@ def handle_audio_message(event):
                 )
                 reply_text = response.choices[0].message.content
                 logging.info(f"GPT-4 回應: {reply_text}")
-                messaging_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessage(text=reply_text)]
-                    )
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextMessage(text=reply_text)
                 )
         except Exception as e:
             logging.error(f"處理識別文字時發生錯誤：{str(e)}")
@@ -717,11 +709,9 @@ def handle_audio_message(event):
 
     except Exception as e:
         logging.error(f"處理語音訊息時發生錯誤：{str(e)}")
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text="抱歉，處理語音訊息時發生錯誤。請稍後再試，或改用文字訊息。")]
-            )
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextMessage(text="抱歉，處理語音訊息時發生錯誤。請稍後再試，或改用文字訊息。")
         )
     finally:
         # 清理臨時檔案
