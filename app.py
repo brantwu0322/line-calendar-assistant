@@ -78,6 +78,27 @@ CLIENT_SECRETS_FILE = 'client_secrets.json'
 # 初始化簡體轉繁體轉換器
 converter = opencc.OpenCC('s2twp')
 
+def require_authorization(func):
+    """檢查使用者是否已授權的裝飾器"""
+    @wraps(func)
+    def wrapper(event, *args, **kwargs):
+        line_user_id = event.source.user_id
+        service, error = get_google_calendar_service(line_user_id)
+        
+        if error:
+            # 如果未授權，提供授權連結
+            auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
+            messaging_api.reply_message_with_http_info(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=f"請先完成 Google Calendar 授權：\n{auth_url}")]
+                )
+            )
+            return
+        
+        return func(event, service, *args, **kwargs)
+    return wrapper
+
 # 初始化資料庫
 def init_db():
     try:
@@ -745,25 +766,6 @@ def oauth2callback(line_user_id):
     save_user_credentials(line_user_id, credentials)
     
     return "授權成功！請回到 LINE 繼續使用。"
-
-def require_authorization(func):
-    """檢查使用者是否已授權的裝飾器"""
-    @wraps(func)
-    def wrapper(event, *args, **kwargs):
-        line_user_id = event.source.user_id
-        service, error = get_google_calendar_service(line_user_id)
-        
-        if error:
-            # 如果未授權，提供授權連結
-            auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextMessage(text=f"請先完成 Google Calendar 授權：\n{auth_url}")
-            )
-            return
-        
-        return func(event, service, *args, **kwargs)
-    return wrapper
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
