@@ -5,9 +5,20 @@ import time
 from datetime import datetime, timedelta, time as datetime_time
 import re
 from flask import Flask, request, abort, redirect, url_for, session
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage, AudioMessage, AudioSendMessage
+from linebot.v3 import WebhookHandler
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.webhooks import (
+    MessageEvent,
+    TextMessageContent,
+    AudioMessageContent
+)
+from linebot.v3.messaging import Configuration, MessagingApi, ApiClient
+from linebot.v3.messaging.models import (
+    TextMessage,
+    ReplyMessageRequest,
+    AudioMessage
+)
+from linebot.v3.webhooks.models import MessageContent
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
@@ -53,7 +64,9 @@ Session(app)
 channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.getenv('LINE_CHANNEL_SECRET')
 
-line_bot_api = LineBotApi(channel_access_token)
+configuration = Configuration(access_token=channel_access_token)
+api_client = ApiClient(configuration)
+messaging_api = MessagingApi(api_client)
 handler = WebhookHandler(channel_secret)
 
 # Google Calendar API 設定
@@ -511,21 +524,27 @@ def handle_text_message(event, service):
                 )
                 reply_text = response.choices[0].message.content
                 logging.info(f"GPT-4 生成的回覆：{reply_text}")
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextMessage(text=reply_text)
+                messaging_api.reply_message_with_http_info(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=reply_text)]
+                    )
                 )
             else:
                 logging.error("建立事件失敗")
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextMessage(text="抱歉，建立行程時發生錯誤。")
+                messaging_api.reply_message_with_http_info(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
+                    )
                 )
         else:
             logging.error("無法解析事件資訊")
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")
+            messaging_api.reply_message_with_http_info(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")]
+                )
             )
     else:
         logging.info("收到一般訊息，使用 GPT-4 處理")
@@ -539,9 +558,11 @@ def handle_text_message(event, service):
         )
         reply_text = response.choices[0].message.content
         logging.info(f"GPT-4 回應: {reply_text}")
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextMessage(text=reply_text)
+        messaging_api.reply_message_with_http_info(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=reply_text)]
+            )
         )
 
 @handler.add(MessageEvent, message=AudioMessageContent)
@@ -552,7 +573,7 @@ def handle_audio_message(event, service):
     wav_path = None
     try:
         # 下載音訊檔案
-        message_content = line_bot_api.get_message_content(event.message.id)
+        message_content = messaging_api.get_message_content(event.message.id)
         temp_audio_path = tempfile.mktemp(suffix='.m4a')
         wav_path = tempfile.mktemp(suffix='.wav')
         
@@ -625,21 +646,27 @@ def handle_audio_message(event, service):
                         )
                         reply_text = response.choices[0].message.content
                         logging.info(f"GPT-4 生成的回覆：{reply_text}")
-                        line_bot_api.reply_message(
-                            event.reply_token,
-                            TextMessage(text=reply_text)
+                        messaging_api.reply_message_with_http_info(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text=reply_text)]
+                            )
                         )
                     else:
                         logging.error("建立事件失敗")
-                        line_bot_api.reply_message(
-                            event.reply_token,
-                            TextMessage(text="抱歉，建立行程時發生錯誤。")
+                        messaging_api.reply_message_with_http_info(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
+                            )
                         )
                 else:
                     logging.error("無法解析事件資訊")
-                    line_bot_api.reply_message(
-                        event.reply_token,
-                        TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")
+                    messaging_api.reply_message_with_http_info(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")]
+                        )
                     )
             else:
                 logging.info("收到一般語音訊息，使用 GPT-4 處理")
@@ -653,9 +680,11 @@ def handle_audio_message(event, service):
                 )
                 reply_text = response.choices[0].message.content
                 logging.info(f"GPT-4 回應: {reply_text}")
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextMessage(text=reply_text)
+                messaging_api.reply_message_with_http_info(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=reply_text)]
+                    )
                 )
         except Exception as e:
             logging.error(f"處理識別文字時發生錯誤：{str(e)}")
@@ -663,9 +692,11 @@ def handle_audio_message(event, service):
 
     except Exception as e:
         logging.error(f"處理語音訊息時發生錯誤：{str(e)}")
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextMessage(text="抱歉，處理語音訊息時發生錯誤。請稍後再試，或改用文字訊息。")
+        messaging_api.reply_message_with_http_info(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text="抱歉，處理語音訊息時發生錯誤。請稍後再試，或改用文字訊息。")]
+            )
         )
     finally:
         # 清理臨時檔案
