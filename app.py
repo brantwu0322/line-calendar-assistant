@@ -119,6 +119,19 @@ def init_db():
         logger.error(f"Error initializing database: {str(e)}")
         raise
 
+def get_all_users():
+    """獲取所有已授權的使用者"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('SELECT line_user_id FROM users')
+        users = c.fetchall()
+        conn.close()
+        return [user[0] for user in users]
+    except Exception as e:
+        logger.error(f"Error getting users: {str(e)}")
+        return []
+
 # 獲取用戶認證
 def get_user_credentials(line_user_id):
     try:
@@ -772,5 +785,12 @@ if __name__ == "__main__":
     logger.info(f"LINE_CHANNEL_ACCESS_TOKEN: {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')[:10]}...")
     logger.info(f"LINE_CHANNEL_SECRET: {os.getenv('LINE_CHANNEL_SECRET')[:10]}...")
     logger.info(f"GOOGLE_CALENDAR_ID: {os.getenv('GOOGLE_CALENDAR_ID')}")
+    init_db()
+    users = get_all_users()
+    logger.info(f"Current authorized users: {len(users)}")
+    if users:
+        logger.info("Authorized user IDs:")
+        for user_id in users:
+            logger.info(f"- {user_id}")
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port) 
