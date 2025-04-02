@@ -5,22 +5,11 @@ import time
 from datetime import datetime, timedelta, time as datetime_time
 import re
 from flask import Flask, request, abort, redirect, url_for, session
-from linebot.v3 import WebhookHandler
-from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.webhooks import (
-    MessageEvent,
-    TextMessageContent,
-    AudioMessageContent
-)
-from linebot.v3.messaging import Configuration, MessagingApi, ApiClient
-from linebot.v3.messaging.models import (
-    TextMessage,
-    ReplyMessageRequest,
-    AudioMessage
-)
-from linebot.v3.webhooks.models import MessageContent
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage, AudioMessage, AudioSendMessage
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import speech_recognition as sr
@@ -30,11 +19,19 @@ import openai
 import requests
 import traceback
 from pydub import AudioSegment
+import opencc
+import sqlite3
+from functools import wraps
+from pydub import AudioSegment
 from linebot import LineBotApi
 from linebot.models import TextMessage, AudioMessage
 import opencc
 import sqlite3
 from functools import wraps
+from datetime import datetime, timedelta
+import pytz
+from dotenv import load_dotenv
+from flask_session import Session
 
 # 設定日誌
 logging.basicConfig(
@@ -52,18 +49,22 @@ for handler in logging.getLogger().handlers[:]:
     logging.getLogger().removeHandler(handler)
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
+app.config['SESSION_TYPE'] = 'filesystem'
+Session(app)
 
 # LINE Bot 設定
 channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.getenv('LINE_CHANNEL_SECRET')
 
 line_bot_api = LineBotApi(channel_access_token)
-configuration = Configuration(
-    access_token=channel_access_token
-)
-api_client = ApiClient(configuration)
 handler = WebhookHandler(channel_secret)
-messaging_api = MessagingApi(api_client)
+
+# Google Calendar API 設定
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+API_SERVICE_NAME = 'calendar'
+API_VERSION = 'v3'
+CLIENT_SECRETS_FILE = 'client_secrets.json'
 
 # 初始化簡體轉繁體轉換器
 converter = opencc.OpenCC('s2twp')
