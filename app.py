@@ -4,7 +4,7 @@ import sys
 import time
 from datetime import datetime, timedelta, time as datetime_time
 import re
-from flask import Flask, request, abort
+from flask import Flask, request, abort, redirect, url_for, session
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import (
@@ -33,6 +33,8 @@ from pydub import AudioSegment
 from linebot import LineBotApi
 from linebot.models import TextMessage, AudioMessage
 import opencc
+import sqlite3
+from functools import wraps
 
 # 設定日誌
 logging.basicConfig(
@@ -66,6 +68,75 @@ messaging_api = MessagingApi(api_client)
 # 初始化簡體轉繁體轉換器
 converter = opencc.OpenCC('s2twp')
 
+# 資料庫設定
+def init_db():
+    """初始化資料庫"""
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            line_user_id TEXT PRIMARY KEY,
+            google_credentials TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def get_user_credentials(line_user_id):
+    """取得使用者的 Google Calendar 認證資訊"""
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('SELECT google_credentials FROM users WHERE line_user_id = ?', (line_user_id,))
+    result = c.fetchone()
+    conn.close()
+    
+    if result:
+        return json.loads(result[0])
+    return None
+
+def save_user_credentials(line_user_id, credentials):
+    """儲存使用者的 Google Calendar 認證資訊"""
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('''
+        INSERT OR REPLACE INTO users (line_user_id, google_credentials)
+        VALUES (?, ?)
+    ''', (line_user_id, json.dumps(credentials)))
+    conn.commit()
+    conn.close()
+
+def get_google_calendar_service(line_user_id):
+    """取得使用者的 Google Calendar 服務"""
+    creds = get_user_credentials(line_user_id)
+    
+    if not creds:
+        return None, "請先完成 Google Calendar 授權"
+    
+    try:
+        credentials = Credentials.from_authorized_user_info(creds)
+        
+        # 如果認證已過期，重新整理
+        if credentials and credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
+            save_user_credentials(line_user_id, {
+                'token': credentials.token,
+                'refresh_token': credentials.refresh_token,
+                'token_uri': credentials.token_uri,
+                'client_id': credentials.client_id,
+                'client_secret': credentials.client_secret,
+                'scopes': credentials.scopes
+            })
+        
+        service = build('calendar', 'v3', credentials=credentials)
+        return service, None
+    except Exception as e:
+        logging.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
+        return None, "Google Calendar 服務發生錯誤"
+
+# 初始化資料庫
+init_db()
+
 # 添加保活機制
 def keep_alive():
     """定期發送保活請求"""
@@ -98,62 +169,6 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 # Google Calendar API 設定
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 CALENDAR_ID = os.getenv('GOOGLE_CALENDAR_ID')
-
-def get_google_calendar_service():
-    """取得 Google Calendar API 服務"""
-    logger.info("開始建立 Google Calendar 服務")
-    creds = None
-    
-    # 從環境變數獲取憑證
-    if os.getenv('GOOGLE_CALENDAR_CREDENTIALS') and os.getenv('GOOGLE_CALENDAR_TOKEN'):
-        logger.info("從環境變數讀取 Google Calendar 憑證")
-        try:
-            # 從環境變數讀取憑證
-            creds_info = json.loads(os.getenv('GOOGLE_CALENDAR_CREDENTIALS'))
-            token_info = json.loads(os.getenv('GOOGLE_CALENDAR_TOKEN'))
-            
-            creds = Credentials.from_authorized_user_info(token_info, SCOPES)
-            logger.info("成功從環境變數建立憑證")
-            
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    logger.info("憑證已過期，正在重新整理")
-                    creds.refresh(Request())
-                    # 更新環境變數中的 token
-                    os.environ['GOOGLE_CALENDAR_TOKEN'] = json.dumps(json.loads(creds.to_json()))
-                    logger.info("已更新環境變數中的 token")
-        except Exception as e:
-            logger.error(f"從環境變數讀取憑證時發生錯誤: {str(e)}")
-            logger.exception("詳細錯誤資訊：")
-    else:
-        logger.info("環境變數中沒有 Google Calendar 憑證")
-        # 如果環境變數中沒有憑證，嘗試從文件讀取
-        if os.path.exists('token.json'):
-            logger.info("嘗試從 token.json 讀取憑證")
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            logger.info("憑證已過期，正在重新整理")
-            creds.refresh(Request())
-        else:
-            logger.info("需要重新授權")
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        
-        # 保存到文件
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-            logger.info("已將新憑證保存到 token.json")
-    
-    try:
-        service = build('calendar', 'v3', credentials=creds)
-        logger.info("成功建立 Google Calendar 服務")
-        return service
-    except Exception as e:
-        logger.error(f"建立 Google Calendar 服務時發生錯誤: {str(e)}")
-        logger.exception("詳細錯誤資訊：")
-        raise
 
 def parse_event_text(text):
     """解析文字中的行程資訊"""
@@ -416,29 +431,16 @@ def parse_event_text(text):
         logger.exception("詳細錯誤資訊：")
     return None
 
-def create_calendar_event(event_data):
+def create_calendar_event(service, event_data):
     """建立 Google Calendar 事件"""
     try:
         logger.info("開始建立 Google Calendar 事件")
         logger.info(f"事件資料：{json.dumps(event_data, ensure_ascii=False)}")
         
-        service = get_google_calendar_service()
-        logger.info("成功取得 Google Calendar 服務")
-        
-        event = {
-            'summary': event_data['summary'],
-            'start': event_data['start'],
-            'end': event_data['end']
-        }
-        
-        if 'recurrence' in event_data:
-            event['recurrence'] = event_data['recurrence']
-            logger.info(f"設定重複規則：{event_data['recurrence']}")
-        
-        logger.info(f"準備建立事件：{json.dumps(event, ensure_ascii=False)}")
+        logger.info(f"準備建立事件：{json.dumps(event_data, ensure_ascii=False)}")
         logger.info(f"使用的行事曆 ID：{CALENDAR_ID}")
         
-        event = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+        event = service.events().insert(calendarId=CALENDAR_ID, body=event_data).execute()
         logger.info(f"成功建立事件: {event.get('htmlLink')}")
         return True, event.get('htmlLink')
     except Exception as e:
@@ -469,130 +471,79 @@ def callback():
         return 'Error', 500
 
 @handler.add(MessageEvent, message=TextMessageContent)
-def handle_message(event):
-    try:
-        logging.info(f"開始處理訊息: {event.message.text}")
-        retry_count = 0
-        max_retries = 3
+@require_authorization
+def handle_text_message(event, service):
+    """處理文字訊息"""
+    text = event.message.text
+    logging.info(f"收到文字訊息：{text}")
+    
+    # 檢查是否為行程相關訊息
+    time_keywords = ["點", "時", "早上", "上午", "下午", "晚上", "明天", "後天", "大後天", "下週", "下下週", "天後"]
+    if any(keyword in text for keyword in time_keywords):
+        logging.info("開始處理行程訊息")
+        # 解析事件資訊
+        event_info = parse_event_text(text)
+        logging.info(f"解析結果: {event_info}")
         
-        while retry_count < max_retries:
-            try:
-                # 檢查是否為測試訊息
-                if event.message.text.lower() == "測試":
-                    logging.info("收到測試訊息")
-                    messaging_api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=event.reply_token,
-                            messages=[TextMessage(text="收到您的測試訊息！")]
-                        )
-                    )
-                    return
-                
-                # 檢查是否為行程相關訊息
-                text = event.message.text
-                time_keywords = ["點", "時", "早上", "上午", "下午", "晚上", "明天", "後天", "大後天", "下週", "下下週", "天後"]
-                if any(keyword in text for keyword in time_keywords):
-                    logging.info("開始處理行程訊息")
-                    # 解析事件資訊
-                    event_info = parse_event_text(text)
-                    logging.info(f"解析結果: {event_info}")
-                    
-                    if event_info:
-                        logging.info("成功解析事件資訊，開始建立事件")
-                        # 建立事件
-                        success, result = create_calendar_event(event_info)
-                        if success:
-                            logging.info(f"成功建立事件，結果: {result}")
-                            # 使用 GPT-4 生成回覆訊息
-                            response = openai.ChatCompletion.create(
-                                model="gpt-4",
-                                messages=[
-                                    {
-                                        "role": "system",
-                                        "content": "你是一個友善的 LINE 聊天機器人助手。當用戶設定行程時，請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": f"我已經幫用戶設定了以下行程：\n事件：{event_info['summary']}\n時間：{event_info['start']['dateTime']} - {event_info['end']['dateTime']}\n請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
-                                    }
-                                ],
-                                temperature=0.7
-                            )
-                            reply_text = response.choices[0].message.content
-                            logging.info(f"GPT-4 生成的回覆：{reply_text}")
-                            messaging_api.reply_message(
-                                ReplyMessageRequest(
-                                    reply_token=event.reply_token,
-                                    messages=[TextMessage(text=reply_text)]
-                                )
-                            )
-                        else:
-                            logging.error("建立事件失敗")
-                            messaging_api.reply_message(
-                                ReplyMessageRequest(
-                                    reply_token=event.reply_token,
-                                    messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
-                                )
-                            )
-                    else:
-                        logging.error("無法解析事件資訊")
-                        messaging_api.reply_message(
-                            ReplyMessageRequest(
-                                reply_token=event.reply_token,
-                                messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")]
-                            )
-                        )
-                    break
-                else:
-                    logging.info("收到一般訊息，使用 GPT-4 處理")
-                    # 使用 GPT-4 處理一般訊息
-                    response = openai.ChatCompletion.create(
-                        model="gpt-4",
-                        messages=[
-                            {"role": "system", "content": "你是一個友善的 LINE 聊天機器人助手，請用簡短、親切的語氣回答。"},
-                            {"role": "user", "content": event.message.text}
-                        ]
-                    )
-                    reply_text = response.choices[0].message.content
-                    logging.info(f"GPT-4 回應: {reply_text}")
-                    messaging_api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=event.reply_token,
-                            messages=[TextMessage(text=reply_text)]
-                        )
-                    )
-                    break
-                    
-            except Exception as e:
-                retry_count += 1
-                logging.error(f"處理訊息時發生錯誤 (嘗試 {retry_count}/{max_retries}): {str(e)}")
-                logging.error(f"錯誤類型: {type(e).__name__}")
-                logging.error(f"錯誤詳情: {traceback.format_exc()}")
-                
-                if retry_count == max_retries:
-                    logging.error("達到最大重試次數")
-                    messaging_api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=event.reply_token,
-                            messages=[TextMessage(text="抱歉，處理您的訊息時發生錯誤，請稍後再試。")]
-                        )
-                    )
-                else:
-                    time.sleep(1)  # 等待一秒後重試
-                    
-    except Exception as e:
-        logging.error(f"處理訊息時發生未預期的錯誤: {str(e)}")
-        logging.error(f"錯誤類型: {type(e).__name__}")
-        logging.error(f"錯誤詳情: {traceback.format_exc()}")
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text="抱歉，系統發生錯誤，請稍後再試。")]
+        if event_info:
+            logging.info("成功解析事件資訊，開始建立事件")
+            # 建立事件
+            success, result = create_calendar_event(service, event_info)
+            if success:
+                logging.info(f"成功建立事件，結果: {result}")
+                # 使用 GPT-4 生成回覆訊息
+                response = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "你是一個友善的 LINE 聊天機器人助手。當用戶設定行程時，請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
+                        },
+                        {
+                            "role": "user",
+                            "content": f"我已經幫用戶設定了以下行程：\n事件：{event_info['summary']}\n時間：{event_info['start']['dateTime']} - {event_info['end']['dateTime']}\n請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
+                        }
+                    ],
+                    temperature=0.7
+                )
+                reply_text = response.choices[0].message.content
+                logging.info(f"GPT-4 生成的回覆：{reply_text}")
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextMessage(text=reply_text)
+                )
+            else:
+                logging.error("建立事件失敗")
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextMessage(text="抱歉，建立行程時發生錯誤。")
+                )
+        else:
+            logging.error("無法解析事件資訊")
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")
             )
+    else:
+        logging.info("收到一般訊息，使用 GPT-4 處理")
+        # 使用 GPT-4 處理一般訊息
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "你是一個友善的 LINE 聊天機器人助手，請用簡短、親切的語氣回答。"},
+                {"role": "user", "content": text}
+            ]
+        )
+        reply_text = response.choices[0].message.content
+        logging.info(f"GPT-4 回應: {reply_text}")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextMessage(text=reply_text)
         )
 
 @handler.add(MessageEvent, message=AudioMessageContent)
-def handle_audio_message(event):
+@require_authorization
+def handle_audio_message(event, service):
     """處理語音訊息"""
     temp_audio_path = None
     wav_path = None
@@ -651,7 +602,7 @@ def handle_audio_message(event):
                 if event_info:
                     logging.info("成功解析事件資訊，開始建立事件")
                     # 建立事件
-                    success, result = create_calendar_event(event_info)
+                    success, result = create_calendar_event(service, event_info)
                     if success:
                         logging.info(f"成功建立事件，結果: {result}")
                         # 使用 GPT-4 生成回覆訊息
@@ -722,6 +673,70 @@ def handle_audio_message(event):
                     logging.info(f"成功刪除臨時檔案：{file_path}")
                 except Exception as e:
                     logging.error(f"刪除臨時檔案時發生錯誤：{str(e)}")
+
+# 新增授權相關路由
+@app.route('/authorize/<line_user_id>')
+def authorize(line_user_id):
+    """處理 Google Calendar 授權"""
+    flow = InstalledAppFlow.from_client_secrets_file(
+        'credentials.json',
+        ['https://www.googleapis.com/auth/calendar']
+    )
+    flow.redirect_uri = url_for('oauth2callback', line_user_id=line_user_id, _external=True)
+    
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
+    )
+    
+    session['state'] = state
+    return redirect(authorization_url)
+
+@app.route('/oauth2callback/<line_user_id>')
+def oauth2callback(line_user_id):
+    """處理 OAuth2 回調"""
+    state = session['state']
+    flow = InstalledAppFlow.from_client_secrets_file(
+        'credentials.json',
+        ['https://www.googleapis.com/auth/calendar'],
+        state=state
+    )
+    flow.redirect_uri = url_for('oauth2callback', line_user_id=line_user_id, _external=True)
+    
+    authorization_response = request.url
+    flow.fetch_token(authorization_response=authorization_response)
+    credentials = flow.credentials
+    
+    # 儲存認證資訊
+    save_user_credentials(line_user_id, {
+        'token': credentials.token,
+        'refresh_token': credentials.refresh_token,
+        'token_uri': credentials.token_uri,
+        'client_id': credentials.client_id,
+        'client_secret': credentials.client_secret,
+        'scopes': credentials.scopes
+    })
+    
+    return "授權成功！請回到 LINE 繼續使用。"
+
+def require_authorization(func):
+    """檢查使用者是否已授權的裝飾器"""
+    @wraps(func)
+    def wrapper(event, *args, **kwargs):
+        line_user_id = event.source.user_id
+        service, error = get_google_calendar_service(line_user_id)
+        
+        if error:
+            # 如果未授權，提供授權連結
+            auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextMessage(text=f"請先完成 Google Calendar 授權：\n{auth_url}")
+            )
+            return
+        
+        return func(event, service, *args, **kwargs)
+    return wrapper
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
