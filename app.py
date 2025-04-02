@@ -937,12 +937,55 @@ def create_order(line_user_id, amount):
         logger.error(f"Error creating order: {str(e)}")
         return None
 
+def verify_admin(username, password):
+    """驗證管理員帳號密碼"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('SELECT password_hash FROM admins WHERE username = ?', (username,))
+        result = c.fetchone()
+        conn.close()
+        
+        if result:
+            # 這裡使用簡單的密碼驗證，實際應用中應該使用更安全的方式
+            return result[0] == password
+        return False
+    except Exception as e:
+        logger.error(f"Error verifying admin: {str(e)}")
+        return False
+
+@app.route('/admin/logout')
+def admin_logout():
+    """管理員登出"""
+    session.pop('admin', None)
+    return redirect(url_for('admin_login'))
+
+def init_admin():
+    """初始化管理員帳號"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # 檢查是否已存在管理員帳號
+        c.execute('SELECT COUNT(*) FROM admins')
+        if c.fetchone()[0] == 0:
+            # 創建預設管理員帳號
+            c.execute('''INSERT INTO admins (username, password_hash)
+                        VALUES (?, ?)''', ('admin', 'admin'))
+            conn.commit()
+            logger.info("Created default admin account")
+        
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error initializing admin account: {str(e)}")
+
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
     logger.info(f"LINE_CHANNEL_ACCESS_TOKEN: {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')[:10]}...")
     logger.info(f"LINE_CHANNEL_SECRET: {os.getenv('LINE_CHANNEL_SECRET')[:10]}...")
     logger.info(f"GOOGLE_CALENDAR_ID: {os.getenv('GOOGLE_CALENDAR_ID')}")
     init_db()
+    init_admin()  # 初始化管理員帳號
     users = get_all_users()
     logger.info(f"Current authorized users: {len(users)}")
     if users:
