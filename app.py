@@ -34,19 +34,15 @@ from dotenv import load_dotenv
 from flask_session import Session
 
 # 設定日誌
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('app.log', encoding='utf-8')
-    ]
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 移除重複的日誌處理器
-for handler in logging.getLogger().handlers[:]:
-    logging.getLogger().removeHandler(handler)
+# 載入環境變數
+load_dotenv()
+
+# 設定資料庫路徑
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'users.db')
+logger.info(f"Database path: {DB_PATH}")
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
@@ -69,43 +65,62 @@ CLIENT_SECRETS_FILE = 'client_secrets.json'
 # 初始化簡體轉繁體轉換器
 converter = opencc.OpenCC('s2twp')
 
-# 資料庫設定
+# 初始化資料庫
 def init_db():
-    """初始化資料庫"""
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            line_user_id TEXT PRIMARY KEY,
-            google_credentials TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    try:
+        # 確保資料庫目錄存在
+        db_dir = os.path.dirname(DB_PATH)
+        if not os.path.exists(db_dir):
+            os.makedirs(db_dir)
+            logger.info(f"Created database directory: {db_dir}")
+        
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS users
+                     (line_user_id TEXT PRIMARY KEY, credentials TEXT)''')
+        conn.commit()
+        conn.close()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+        raise
 
+# 獲取用戶認證
 def get_user_credentials(line_user_id):
-    """取得使用者的 Google Calendar 認證資訊"""
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute('SELECT google_credentials FROM users WHERE line_user_id = ?', (line_user_id,))
-    result = c.fetchone()
-    conn.close()
-    
-    if result:
-        return json.loads(result[0])
-    return None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('SELECT credentials FROM users WHERE line_user_id = ?', (line_user_id,))
+        result = c.fetchone()
+        conn.close()
+        
+        if result:
+            return Credentials.from_authorized_user_info(json.loads(result[0]))
+        return None
+    except Exception as e:
+        logger.error(f"Error getting user credentials: {str(e)}")
+        return None
 
+# 保存用戶認證
 def save_user_credentials(line_user_id, credentials):
-    """儲存使用者的 Google Calendar 認證資訊"""
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute('''
-        INSERT OR REPLACE INTO users (line_user_id, google_credentials)
-        VALUES (?, ?)
-    ''', (line_user_id, json.dumps(credentials)))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('INSERT OR REPLACE INTO users (line_user_id, credentials) VALUES (?, ?)',
+                  (line_user_id, json.dumps({
+                      'token': credentials.token,
+                      'refresh_token': credentials.refresh_token,
+                      'token_uri': credentials.token_uri,
+                      'client_id': credentials.client_id,
+                      'client_secret': credentials.client_secret,
+                      'scopes': credentials.scopes
+                  })))
+        conn.commit()
+        conn.close()
+        logger.info(f"Saved credentials for user: {line_user_id}")
+    except Exception as e:
+        logger.error(f"Error saving user credentials: {str(e)}")
+        raise
 
 def get_google_calendar_service(line_user_id):
     """取得使用者的 Google Calendar 服務"""
@@ -134,19 +149,6 @@ def get_google_calendar_service(line_user_id):
     except Exception as e:
         logging.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
         return None, "Google Calendar 服務發生錯誤"
-
-# 初始化資料庫
-init_db()
-
-# 添加保活機制
-def keep_alive():
-    """定期發送保活請求"""
-    try:
-        messaging_api.get_bot_info()
-        logger.info("LINE API 保活成功")
-    except Exception as e:
-        logger.error(f"LINE API 保活失敗: {str(e)}")
-        logger.exception("詳細錯誤資訊：")
 
 # 在應用程式啟動時設置保活機制
 @app.before_first_request
@@ -709,14 +711,7 @@ def oauth2callback(line_user_id):
     credentials = flow.credentials
     
     # 儲存認證資訊
-    save_user_credentials(line_user_id, {
-        'token': credentials.token,
-        'refresh_token': credentials.refresh_token,
-        'token_uri': credentials.token_uri,
-        'client_id': credentials.client_id,
-        'client_secret': credentials.client_secret,
-        'scopes': credentials.scopes
-    })
+    save_user_credentials(line_user_id, credentials)
     
     return "授權成功！請回到 LINE 繼續使用。"
 
