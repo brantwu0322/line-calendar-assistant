@@ -1,23 +1,17 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LINE 行事曆助手 - 管理後台</title>
+    <title>LINE Calendar Assistant - 管理後台</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        .user-card {
-            margin-bottom: 1rem;
-        }
-        .status-badge {
-            font-size: 0.8rem;
-        }
+        .status-active { color: green; }
+        .status-inactive { color: red; }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
-            <a class="navbar-brand" href="#">LINE 行事曆助手 - 管理後台</a>
+            <a class="navbar-brand" href="#">LINE Calendar Assistant</a>
             <div class="navbar-nav ms-auto">
                 <a class="nav-link" href="{{ url_for('admin_logout') }}">登出</a>
             </div>
@@ -25,44 +19,47 @@
     </nav>
 
     <div class="container mt-4">
-        <h2>使用者管理</h2>
-        <div class="row">
-            {% for user in users %}
-            <div class="col-md-6 col-lg-4">
-                <div class="card user-card">
-                    <div class="card-body">
-                        <h5 class="card-title">使用者 ID: {{ user[0] }}</h5>
-                        <p class="card-text">
-                            <span class="badge {% if user[1] == 'premium' %}bg-success{% else %}bg-secondary{% endif %} status-badge">
-                                {{ user[1] }}
-                            </span>
-                        </p>
-                        <p class="card-text">
-                            <small class="text-muted">
-                                到期日: {{ user[2] or '未訂閱' }}<br>
-                                註冊日: {{ user[3] }}<br>
-                                訂單數: {{ user[4] }}
-                            </small>
-                        </p>
-                        <button class="btn btn-danger btn-sm" onclick="removeUser('{{ user[0] }}')">
-                            移除使用者
-                        </button>
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
+        <h2>用戶管理</h2>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>用戶 ID</th>
+                        <th>訂閱狀態</th>
+                        <th>到期日期</th>
+                        <th>註冊時間</th>
+                        <th>訂單數</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td>{{ user[0] }}</td>
+                        <td class="{% if user[1] == 'premium' %}status-active{% else %}status-inactive{% endif %}">
+                            {{ user[1] }}
+                        </td>
+                        <td>{{ user[2] or '無' }}</td>
+                        <td>{{ user[3] }}</td>
+                        <td>{{ user[4] }}</td>
+                        <td>
+                            <button class="btn btn-danger btn-sm" onclick="removeUser('{{ user[0] }}')">
+                                移除
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         function removeUser(lineUserId) {
-            if (confirm('確定要移除這個使用者嗎？此操作無法復原。')) {
+            if (confirm('確定要移除這個用戶嗎？')) {
                 fetch(`/admin/user/${lineUserId}/remove`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
                 })
                 .then(response => response.text())
                 .then(result => {
@@ -73,7 +70,7 @@
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    alert('移除使用者時發生錯誤');
+                    alert('移除用戶時發生錯誤');
                 });
             }
         }

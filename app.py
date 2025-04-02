@@ -822,7 +822,6 @@ def admin_login():
         username = request.form.get('username')
         password = request.form.get('password')
         
-        # 驗證管理員帳號密碼
         if verify_admin(username, password):
             session['admin'] = username
             return redirect(url_for('admin_dashboard'))
@@ -841,7 +840,6 @@ def admin_dashboard():
     if 'admin' not in session:
         return redirect(url_for('admin_login'))
     
-    # 獲取所有使用者資訊
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''SELECT u.line_user_id, u.subscription_status, u.subscription_end_date,
