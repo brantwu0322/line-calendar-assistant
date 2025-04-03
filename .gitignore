@@ -1,6 +1,5 @@
 # 敏感文件
 .env
-credentials.json
 token.json
 
 # Python

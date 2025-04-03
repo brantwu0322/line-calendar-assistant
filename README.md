@@ -58,60 +58,15 @@ pip install -r requirements.txt
 
 2. 設定環境變數：
 ```bash
-LINE_CHANNEL_ACCESS_TOKEN=你的LINE頻道存取權杖
-LINE_CHANNEL_SECRET=你的LINE頻道密鑰
-GOOGLE_CALENDAR_ID=你的Google行事曆ID
+LINE_CHANNEL_ACCESS_TOKEN=你的LINE Channel Access Token
+LINE_CHANNEL_SECRET=你的LINE Channel Secret
 GOOGLE_CALENDAR_CREDENTIALS=你的Google Calendar API憑證
 GOOGLE_CALENDAR_TOKEN=你的Google Calendar API權杖
 OPENAI_API_KEY=你的OpenAI API金鑰
+FLASK_SECRET_KEY=你的Flask密鑰
 ```
 
 3. 啟動應用程式：
 ```bash
 python app.py
 ```
-
-## 使用方式
-
-### 文字訊息
-1. 直接輸入行程描述，例如：
-   - 明天下午兩點跟客戶開會
-   - 下週三早上九點去看牙醫
-   - 每週五下午三點做瑜珈
-   - 三天後下午四點半打籃球
-
-2. 系統會自動解析時間和事件內容，並建立相應的行程。
-
-### 語音訊息（開發中）
-1. 發送語音訊息描述行程
-2. 系統會將語音轉換為文字
-3. 解析文字內容並建立行程
-
-## 注意事項
-
-- 請確保環境變數正確設定
-- 需要有效的 Google Calendar API 憑證
-- 需要有效的 OpenAI API 金鑰
-- 建議在安靜的環境中使用語音功能
-
-## 開發進度
-
-### 已完成
-- [x] 基本文字訊息處理
-- [x] Google Calendar 整合
-- [x] 錯誤處理機制
-- [x] 系統監控功能
-
-### 開發中
-- [ ] 語音訊息處理優化
-- [ ] 行事曆查詢功能
-- [ ] 行事曆管理功能
-- [ ] 使用者體驗優化
-
-## 貢獻指南
-
-歡迎提交 Issue 和 Pull Request 來協助改進這個專案。
-
-## 授權
-
-MIT License 

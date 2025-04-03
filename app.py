@@ -253,7 +253,6 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 
 # Google Calendar API 設定
 SCOPES = ['https://www.googleapis.com/auth/calendar']
-CALENDAR_ID = os.getenv('GOOGLE_CALENDAR_ID')
 
 def parse_event_text(text):
     """解析文字中的行程資訊"""
@@ -981,7 +980,6 @@ if __name__ == "__main__":
     logger.info("Starting Flask application...")
     logger.info(f"LINE_CHANNEL_ACCESS_TOKEN: {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')[:10]}...")
     logger.info(f"LINE_CHANNEL_SECRET: {os.getenv('LINE_CHANNEL_SECRET')[:10]}...")
-    logger.info(f"GOOGLE_CALENDAR_ID: {os.getenv('GOOGLE_CALENDAR_ID')}")
     init_db()
     init_admin()  # 初始化管理員帳號
     users = get_all_users()
