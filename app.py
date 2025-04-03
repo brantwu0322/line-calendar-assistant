@@ -4,7 +4,7 @@ import sys
 import time
 from datetime import datetime, timedelta, time as datetime_time
 import re
-from flask import Flask, request, abort, redirect, url_for, session
+from flask import Flask, request, abort, redirect, url_for, session, render_template
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import (
@@ -43,6 +43,7 @@ from datetime import datetime, timedelta
 import pytz
 from dotenv import load_dotenv
 from flask_session import Session
+from flask_wtf.csrf import CSRFProtect
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -58,6 +59,7 @@ logger.info(f"Database path: {DB_PATH}")
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
 app.config['SESSION_TYPE'] = 'filesystem'
+csrf = CSRFProtect(app)
 Session(app)
 
 # LINE Bot 設定
@@ -98,7 +100,7 @@ def require_authorization(func):
             return
         
         # 檢查 Google Calendar 授權
-        service, error = get_google_calendar_service(line_user_id)
+        service, error = get_google_calendar_service()
         if error:
             auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
             messaging_api.reply_message_with_http_info(
@@ -204,33 +206,47 @@ def save_user_credentials(line_user_id, credentials):
         logger.error(f"Error saving user credentials: {str(e)}")
         raise
 
-def get_google_calendar_service(line_user_id):
+def get_google_calendar_service(line_user_id=None):
     """取得使用者的 Google Calendar 服務"""
-    creds = get_user_credentials(line_user_id)
-    
-    if not creds:
-        return None, "請先完成 Google Calendar 授權"
-    
-    try:
-        credentials = Credentials.from_authorized_user_info(creds)
-        
-        # 如果認證已過期，重新整理
-        if credentials and credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-            save_user_credentials(line_user_id, {
-                'token': credentials.token,
-                'refresh_token': credentials.refresh_token,
-                'token_uri': credentials.token_uri,
-                'client_id': credentials.client_id,
-                'client_secret': credentials.client_secret,
-                'scopes': credentials.scopes
-            })
-        
-        service = build('calendar', 'v3', credentials=credentials)
-        return service, None
-    except Exception as e:
-        logging.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
-        return None, "Google Calendar 服務發生錯誤"
+    if line_user_id:
+        creds = get_user_credentials(line_user_id)
+        if not creds:
+            return None, "請先完成 Google Calendar 授權"
+        try:
+            credentials = Credentials.from_authorized_user_info(creds)
+            if credentials and credentials.expired and credentials.refresh_token:
+                credentials.refresh(Request())
+                save_user_credentials(line_user_id, {
+                    'token': credentials.token,
+                    'refresh_token': credentials.refresh_token,
+                    'token_uri': credentials.token_uri,
+                    'client_id': credentials.client_id,
+                    'client_secret': credentials.client_secret,
+                    'scopes': credentials.scopes
+                })
+            service = build('calendar', 'v3', credentials=credentials)
+            return service, None
+        except Exception as e:
+            logging.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
+            return None, "Google Calendar 服務發生錯誤"
+    else:
+        try:
+            # 從環境變數讀取憑證
+            credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+            if credentials_json:
+                credentials_info = json.loads(credentials_json)
+                # 創建臨時憑證文件
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+                    json.dump(credentials_info, temp_file)
+                    temp_file_path = temp_file.name
+                flow = InstalledAppFlow.from_client_secrets_file(temp_file_path, SCOPES)
+                os.unlink(temp_file_path)
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            return flow, None
+        except Exception as e:
+            logging.error(f"初始化 Google Calendar 流程時發生錯誤：{str(e)}")
+            return None, "無法初始化 Google Calendar 授權流程"
 
 # 在應用程式啟動時設置保活機制
 @app.before_first_request
@@ -537,101 +553,102 @@ def callback():
     try:
         signature = request.headers['X-Line-Signature']
         body = request.get_data(as_text=True)
-        logging.info(f"收到 LINE 訊息: {body}")
-    
+        logger.info("收到 LINE Webhook 請求")
+        logger.info(f"Signature: {signature}")
+        logger.info(f"Request body: {body}")
+        
         try:
             handler.handle(body, signature)
+        except InvalidSignatureError:
+            logger.error("無效的簽名")
+            abort(400)
         except Exception as e:
-            logging.error(f"處理訊息時發生錯誤: {str(e)}")
-            logging.error(f"錯誤類型: {type(e).__name__}")
-            logging.error(f"錯誤詳情: {traceback.format_exc()}")
+            logger.error(f"處理 Webhook 時發生錯誤: {str(e)}")
+            logger.error(f"錯誤類型: {type(e).__name__}")
+            logger.error(f"錯誤詳情: {traceback.format_exc()}")
             return 'Error', 500
             
         return 'OK'
     except Exception as e:
-        logging.error(f"回調處理時發生錯誤: {str(e)}")
-        logging.error(f"錯誤類型: {type(e).__name__}")
-        logging.error(f"錯誤詳情: {traceback.format_exc()}")
+        logger.error(f"Callback 路由發生錯誤: {str(e)}")
+        logger.error(f"錯誤類型: {type(e).__name__}")
+        logger.error(f"錯誤詳情: {traceback.format_exc()}")
         return 'Error', 500
 
 @handler.add(MessageEvent, message=TextMessageContent)
-@require_authorization
-def handle_text_message(event, service):
-    """處理文字訊息"""
-    text = event.message.text
-    logging.info(f"收到文字訊息：{text}")
-    
-    # 檢查是否為行程相關訊息
-    time_keywords = ["點", "時", "早上", "上午", "下午", "晚上", "明天", "後天", "大後天", "下週", "下下週", "天後"]
-    if any(keyword in text for keyword in time_keywords):
-        logging.info("開始處理行程訊息")
-        # 解析事件資訊
-        event_info = parse_event_text(text)
-        logging.info(f"解析結果: {event_info}")
+def handle_text_message(event):
+    try:
+        text = event.message.text
+        logger.info(f"收到文字訊息：{text}")
         
-        if event_info:
-            logging.info("成功解析事件資訊，開始建立事件")
-            # 建立事件
-            success, result = create_calendar_event(service, event_info)
-            if success:
-                logging.info(f"成功建立事件，結果: {result}")
-                # 使用 GPT-4 生成回覆訊息
-                response = openai.ChatCompletion.create(
-                    model="gpt-4",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "你是一個友善的 LINE 聊天機器人助手。當用戶設定行程時，請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
-                        },
-                        {
-                            "role": "user",
-                            "content": f"我已經幫用戶設定了以下行程：\n事件：{event_info['summary']}\n時間：{event_info['start']['dateTime']} - {event_info['end']['dateTime']}\n請用親切、生活化的語氣回覆，並加入一些貼心的提醒。"
-                        }
-                    ],
-                    temperature=0.7
-                )
-                reply_text = response.choices[0].message.content
-                logging.info(f"GPT-4 生成的回覆：{reply_text}")
+        # 檢查用戶狀態
+        line_user_id = event.source.user_id
+        logger.info(f"用戶 ID: {line_user_id}")
+        
+        # 檢查是否為行程相關訊息
+        time_keywords = ["點", "時", "早上", "上午", "下午", "晚上", "明天", "後天", "大後天", "下週", "下下週", "天後"]
+        
+        if any(keyword in text for keyword in time_keywords):
+            logger.info("檢測到行程相關訊息")
+            # 檢查用戶授權
+            service, error = get_google_calendar_service()
+            if error:
+                logger.info(f"用戶未授權: {error}")
+                auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
                 messaging_api.reply_message_with_http_info(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text=reply_text)]
+                        messages=[TextMessage(text=f"請先完成 Google Calendar 授權：\n{auth_url}")]
                     )
                 )
+                return
+            
+            # 解析事件資訊
+            event_info = parse_event_text(text)
+            if event_info:
+                logger.info(f"解析結果: {event_info}")
+                success, result = create_calendar_event(service, event_info)
+                if success:
+                    messaging_api.reply_message_with_http_info(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text=f"已為您建立行程：\n{result}")]
+                        )
+                    )
+                else:
+                    messaging_api.reply_message_with_http_info(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text=f"建立行程失敗：{result}")]
+                        )
+                    )
             else:
-                logging.error("建立事件失敗")
                 messaging_api.reply_message_with_http_info(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text="抱歉，建立行程時發生錯誤。")]
+                        messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫")]
                     )
                 )
         else:
-            logging.error("無法解析事件資訊")
+            # 一般對話
             messaging_api.reply_message_with_http_info(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫\n3. 每週五下午三點做瑜珈\n4. 三天後下午四點半打籃球")]
+                    messages=[TextMessage(text="收到您的訊息了！")]
                 )
             )
-    else:
-        logging.info("收到一般訊息，使用 GPT-4 處理")
-        # 使用 GPT-4 處理一般訊息
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "你是一個友善的 LINE 聊天機器人助手，請用簡短、親切的語氣回答。"},
-                {"role": "user", "content": text}
-            ]
-        )
-        reply_text = response.choices[0].message.content
-        logging.info(f"GPT-4 回應: {reply_text}")
-        messaging_api.reply_message_with_http_info(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=reply_text)]
+    except Exception as e:
+        logger.error(f"處理文字訊息時發生錯誤: {str(e)}")
+        logger.error(f"錯誤詳情: {traceback.format_exc()}")
+        try:
+            messaging_api.reply_message_with_http_info(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text="抱歉，系統發生錯誤，請稍後再試。")]
+                )
             )
-        )
+        except Exception as reply_error:
+            logger.error(f"回覆錯誤訊息時發生錯誤: {str(reply_error)}")
 
 @handler.add(MessageEvent, message=AudioMessageContent)
 @require_authorization
@@ -780,17 +797,15 @@ def handle_audio_message(event, service):
 @app.route('/authorize/<line_user_id>')
 def authorize(line_user_id):
     """處理 Google Calendar 授權"""
-    flow = InstalledAppFlow.from_client_secrets_file(
-        'credentials.json',
-        ['https://www.googleapis.com/auth/calendar']
-    )
+    flow, error = get_google_calendar_service()
+    if error:
+        return error, 500
+        
     flow.redirect_uri = url_for('oauth2callback', line_user_id=line_user_id, _external=True)
-    
     authorization_url, state = flow.authorization_url(
         access_type='offline',
         include_granted_scopes='true'
     )
-    
     session['state'] = state
     return redirect(authorization_url)
 
@@ -814,48 +829,36 @@ def oauth2callback(line_user_id):
     
     return "授權成功！請回到 LINE 繼續使用。"
 
-# 管理員後台路由
-@app.route('/admin/login', methods=['GET', 'POST'])
-def admin_login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        if verify_admin(username, password):
-            session['admin'] = username
-            return redirect(url_for('admin_dashboard'))
-        return '登入失敗', 401
-    
-    return '''
-        <form method="post">
-            <input type="text" name="username" placeholder="管理員帳號">
-            <input type="password" name="password" placeholder="密碼">
-            <button type="submit">登入</button>
-        </form>
-    '''
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'admin' not in session:
+            return redirect(url_for('admin_login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 @app.route('/admin/dashboard')
+@admin_required
 def admin_dashboard():
-    if 'admin' not in session:
-        return redirect(url_for('admin_login'))
-    
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''SELECT u.line_user_id, u.subscription_status, u.subscription_end_date,
-                        u.created_at, COUNT(o.order_id) as order_count
-                 FROM users u
-                 LEFT JOIN orders o ON u.line_user_id = o.line_user_id
-                 GROUP BY u.line_user_id''')
-    users = c.fetchall()
-    conn.close()
-    
-    return render_template('admin_dashboard.html', users=users)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''SELECT u.line_user_id, u.subscription_status, u.subscription_end_date,
+                            u.created_at, COUNT(o.order_id) as order_count
+                     FROM users u
+                     LEFT JOIN orders o ON u.line_user_id = o.line_user_id
+                     GROUP BY u.line_user_id''')
+        users = c.fetchall()
+        conn.close()
+        return render_template('admin_dashboard.html', users=users)
+    except Exception as e:
+        logger.error(f"Error in admin dashboard: {str(e)}")
+        return render_template('error.html', error="資料庫存取錯誤"), 500
 
 @app.route('/admin/user/<line_user_id>/remove', methods=['POST'])
+@admin_required
+@csrf.exempt
 def remove_user(line_user_id):
-    if 'admin' not in session:
-        return '未授權', 401
-    
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -975,6 +978,27 @@ def init_admin():
         conn.close()
     except Exception as e:
         logger.error(f"Error initializing admin account: {str(e)}")
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if verify_admin(username, password):
+            session['admin'] = username
+            return redirect(url_for('admin_dashboard'))
+        return render_template('admin_login.html', error='登入失敗，請檢查帳號密碼')
+    
+    return render_template('admin_login.html')
+
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('error.html', error="找不到該頁面"), 404
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    return render_template('error.html', error="伺服器內部錯誤"), 500
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
