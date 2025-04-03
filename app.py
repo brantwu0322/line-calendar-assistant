@@ -826,22 +826,49 @@ def authorize(line_user_id):
 @app.route('/oauth2callback/<line_user_id>')
 def oauth2callback(line_user_id):
     """處理 OAuth2 回調"""
-    state = session['state']
-    flow = InstalledAppFlow.from_client_secrets_file(
-        'credentials.json',
-        ['https://www.googleapis.com/auth/calendar'],
-        state=state
-    )
-    flow.redirect_uri = url_for('oauth2callback', line_user_id=line_user_id, _external=True)
-    
-    authorization_response = request.url
-    flow.fetch_token(authorization_response=authorization_response)
-    credentials = flow.credentials
-    
-    # 儲存認證資訊
-    save_user_credentials(line_user_id, credentials)
-    
-    return "授權成功！請回到 LINE 繼續使用。"
+    try:
+        state = session.get('state')
+        if not state:
+            logger.error("Session state not found")
+            return render_template('error.html', error="授權狀態無效，請重新開始授權流程"), 400
+
+        # 從環境變數獲取憑證
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+        if not credentials_json:
+            logger.error("GOOGLE_CREDENTIALS not found in environment variables")
+            return render_template('error.html', error="系統設定錯誤，請聯繫管理員"), 500
+
+        # 創建臨時憑證文件
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+            json.dump(json.loads(credentials_json), temp_file)
+            temp_file_path = temp_file.name
+
+        try:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                temp_file_path,
+                ['https://www.googleapis.com/auth/calendar'],
+                state=state
+            )
+            flow.redirect_uri = url_for('oauth2callback', line_user_id=line_user_id, _external=True)
+            
+            authorization_response = request.url
+            flow.fetch_token(authorization_response=authorization_response)
+            credentials = flow.credentials
+            
+            # 儲存認證資訊
+            save_user_credentials(line_user_id, credentials)
+            
+            logger.info(f"Successfully authorized user: {line_user_id}")
+            return render_template('success.html', message="授權成功！請回到 LINE 繼續使用。")
+        finally:
+            # 清理臨時文件
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+                logger.info(f"Cleaned up temporary file: {temp_file_path}")
+    except Exception as e:
+        logger.error(f"Error in oauth2callback: {str(e)}")
+        logger.exception("Detailed error information:")
+        return render_template('error.html', error="授權過程發生錯誤，請稍後再試"), 500
 
 def admin_required(f):
     @wraps(f)
