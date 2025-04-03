@@ -596,7 +596,7 @@ def handle_text_message(event):
             if error:
                 logger.info(f"用戶未授權: {error}")
                 auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
-                messaging_api.reply_message_with_http_info(
+                messaging_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
                         messages=[{
@@ -613,7 +613,7 @@ def handle_text_message(event):
                 logger.info(f"解析結果: {event_info}")
                 success, result = create_calendar_event(service, event_info)
                 if success:
-                    messaging_api.reply_message_with_http_info(
+                    messaging_api.reply_message(
                         ReplyMessageRequest(
                             reply_token=event.reply_token,
                             messages=[{
@@ -623,7 +623,7 @@ def handle_text_message(event):
                         )
                     )
                 else:
-                    messaging_api.reply_message_with_http_info(
+                    messaging_api.reply_message(
                         ReplyMessageRequest(
                             reply_token=event.reply_token,
                             messages=[{
@@ -633,7 +633,7 @@ def handle_text_message(event):
                         )
                     )
             else:
-                messaging_api.reply_message_with_http_info(
+                messaging_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
                         messages=[{
@@ -644,7 +644,7 @@ def handle_text_message(event):
                 )
         else:
             # 一般對話
-            messaging_api.reply_message_with_http_info(
+            messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
                     messages=[{
@@ -657,7 +657,7 @@ def handle_text_message(event):
         logger.error(f"處理文字訊息時發生錯誤: {str(e)}")
         logger.error(f"錯誤詳情: {traceback.format_exc()}")
         try:
-            messaging_api.reply_message_with_http_info(
+            messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
                     messages=[{
