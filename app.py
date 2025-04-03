@@ -59,6 +59,7 @@ logger.info(f"Database path: {DB_PATH}")
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
 app.config['SESSION_TYPE'] = 'filesystem'
+app.config['WTF_CSRF_ENABLED'] = False  # 暫時禁用 CSRF 保護，以便調試
 csrf = CSRFProtect(app)
 Session(app)
 
