@@ -537,10 +537,9 @@ def create_calendar_event(service, event_data):
         logger.info("開始建立 Google Calendar 事件")
         logger.info(f"事件資料：{json.dumps(event_data, ensure_ascii=False)}")
         
-        logger.info(f"準備建立事件：{json.dumps(event_data, ensure_ascii=False)}")
-        logger.info(f"使用的行事曆 ID：{CALENDAR_ID}")
-        
-        event = service.events().insert(calendarId=CALENDAR_ID, body=event_data).execute()
+        logger.info("準備建立事件")
+        # 使用 'primary' 代表使用者的主要日曆
+        event = service.events().insert(calendarId='primary', body=event_data).execute()
         logger.info(f"成功建立事件: {event.get('htmlLink')}")
         return True, event.get('htmlLink')
     except Exception as e:
