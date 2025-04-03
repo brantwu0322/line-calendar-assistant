@@ -599,7 +599,10 @@ def handle_text_message(event):
                 messaging_api.reply_message_with_http_info(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text=f"請先完成 Google Calendar 授權：\n{auth_url}")]
+                        messages=[{
+                            "type": "text",
+                            "text": f"請先完成 Google Calendar 授權：\n{auth_url}"
+                        }]
                     )
                 )
                 return
@@ -613,21 +616,30 @@ def handle_text_message(event):
                     messaging_api.reply_message_with_http_info(
                         ReplyMessageRequest(
                             reply_token=event.reply_token,
-                            messages=[TextMessage(text=f"已為您建立行程：\n{result}")]
+                            messages=[{
+                                "type": "text",
+                                "text": f"已為您建立行程：\n{result}"
+                            }]
                         )
                     )
                 else:
                     messaging_api.reply_message_with_http_info(
                         ReplyMessageRequest(
                             reply_token=event.reply_token,
-                            messages=[TextMessage(text=f"建立行程失敗：{result}")]
+                            messages=[{
+                                "type": "text",
+                                "text": f"建立行程失敗：{result}"
+                            }]
                         )
                     )
             else:
                 messaging_api.reply_message_with_http_info(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text="抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫")]
+                        messages=[{
+                            "type": "text",
+                            "text": "抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫"
+                        }]
                     )
                 )
         else:
@@ -635,7 +647,10 @@ def handle_text_message(event):
             messaging_api.reply_message_with_http_info(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text="收到您的訊息了！")]
+                    messages=[{
+                        "type": "text",
+                        "text": "收到您的訊息了！"
+                    }]
                 )
             )
     except Exception as e:
@@ -645,7 +660,10 @@ def handle_text_message(event):
             messaging_api.reply_message_with_http_info(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text="抱歉，系統發生錯誤，請稍後再試。")]
+                    messages=[{
+                        "type": "text",
+                        "text": "抱歉，系統發生錯誤，請稍後再試。"
+                    }]
                 )
             )
         except Exception as reply_error:
