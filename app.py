@@ -215,16 +215,32 @@ def get_google_calendar_service(line_user_id=None):
             creds = get_user_credentials(line_user_id)
             if not creds:
                 # 如果沒有憑證，返回授權 URL
-                flow = Flow.from_client_secrets_file(
-                    'credentials.json',
-                    SCOPES,
-                    redirect_uri=url_for('oauth2callback', line_user_id=line_user_id, _external=True)
-                )
-                authorization_url, _ = flow.authorization_url(
-                    access_type='offline',
-                    include_granted_scopes='true'
-                )
-                return None, authorization_url
+                credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+                if not credentials_json:
+                    return None, "未設定 GOOGLE_CREDENTIALS 環境變數"
+                
+                try:
+                    credentials_info = json.loads(credentials_json)
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+                        json.dump(credentials_info, temp_file)
+                        temp_file_path = temp_file.name
+                    
+                    flow = Flow.from_client_secrets_file(
+                        temp_file_path,
+                        SCOPES,
+                        redirect_uri=url_for('oauth2callback', line_user_id=line_user_id, _external=True)
+                    )
+                    os.unlink(temp_file_path)
+                    authorization_url, _ = flow.authorization_url(
+                        access_type='offline',
+                        include_granted_scopes='true'
+                    )
+                    return None, authorization_url
+                except json.JSONDecodeError:
+                    return None, "GOOGLE_CREDENTIALS 環境變數格式錯誤"
+                except Exception as e:
+                    logging.error(f"初始化 Google Calendar 流程時發生錯誤：{str(e)}")
+                    return None, f"無法初始化 Google Calendar 授權流程：{str(e)}"
             
             try:
                 credentials = Credentials.from_authorized_user_info(creds)
