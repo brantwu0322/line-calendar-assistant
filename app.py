@@ -208,45 +208,46 @@ def save_user_credentials(line_user_id, credentials):
 
 def get_google_calendar_service(line_user_id=None):
     """取得使用者的 Google Calendar 服務"""
-    if line_user_id:
-        creds = get_user_credentials(line_user_id)
-        if not creds:
-            return None, "請先完成 Google Calendar 授權"
-        try:
-            credentials = Credentials.from_authorized_user_info(creds)
-            if credentials and credentials.expired and credentials.refresh_token:
-                credentials.refresh(Request())
-                save_user_credentials(line_user_id, {
-                    'token': credentials.token,
-                    'refresh_token': credentials.refresh_token,
-                    'token_uri': credentials.token_uri,
-                    'client_id': credentials.client_id,
-                    'client_secret': credentials.client_secret,
-                    'scopes': credentials.scopes
-                })
-            service = build('calendar', 'v3', credentials=credentials)
-            return service, None
-        except Exception as e:
-            logging.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
-            return None, "Google Calendar 服務發生錯誤"
-    else:
-        try:
-            # 從環境變數讀取憑證
+    try:
+        if line_user_id:
+            # 如果提供了 line_user_id，嘗試獲取用戶的憑證
+            creds = get_user_credentials(line_user_id)
+            if not creds:
+                return None, "請先完成 Google Calendar 授權"
+            
+            try:
+                credentials = Credentials.from_authorized_user_info(creds)
+                if credentials and credentials.expired and credentials.refresh_token:
+                    credentials.refresh(Request())
+                    save_user_credentials(line_user_id, credentials)
+                service = build('calendar', 'v3', credentials=credentials)
+                return service, None
+            except Exception as e:
+                logging.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
+                return None, "Google Calendar 服務發生錯誤"
+        else:
+            # 如果沒有提供 line_user_id，使用環境變數中的憑證
             credentials_json = os.getenv('GOOGLE_CREDENTIALS')
-            if credentials_json:
+            if not credentials_json:
+                return None, "未設定 GOOGLE_CREDENTIALS 環境變數"
+            
+            try:
                 credentials_info = json.loads(credentials_json)
-                # 創建臨時憑證文件
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
                     json.dump(credentials_info, temp_file)
                     temp_file_path = temp_file.name
+                
                 flow = InstalledAppFlow.from_client_secrets_file(temp_file_path, SCOPES)
                 os.unlink(temp_file_path)
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            return flow, None
-        except Exception as e:
-            logging.error(f"初始化 Google Calendar 流程時發生錯誤：{str(e)}")
-            return None, "無法初始化 Google Calendar 授權流程"
+                return flow, None
+            except json.JSONDecodeError:
+                return None, "GOOGLE_CREDENTIALS 環境變數格式錯誤"
+            except Exception as e:
+                logging.error(f"初始化 Google Calendar 流程時發生錯誤：{str(e)}")
+                return None, f"無法初始化 Google Calendar 授權流程：{str(e)}"
+    except Exception as e:
+        logging.error(f"Google Calendar 服務發生未預期錯誤：{str(e)}")
+        return None, f"系統錯誤：{str(e)}"
 
 # 在應用程式啟動時設置保活機制
 @app.before_first_request
@@ -590,7 +591,7 @@ def handle_text_message(event):
         if any(keyword in text for keyword in time_keywords):
             logger.info("檢測到行程相關訊息")
             # 檢查用戶授權
-            service, error = get_google_calendar_service()
+            service, error = get_google_calendar_service(line_user_id)
             if error:
                 logger.info(f"用戶未授權: {error}")
                 auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
@@ -796,17 +797,31 @@ def handle_audio_message(event, service):
 @app.route('/authorize/<line_user_id>')
 def authorize(line_user_id):
     """處理 Google Calendar 授權"""
-    flow, error = get_google_calendar_service()
-    if error:
-        return error, 500
+    try:
+        # 初始化 OAuth 流程
+        flow, error = get_google_calendar_service()
+        if error:
+            logger.error(f"初始化 OAuth 流程失敗：{error}")
+            return render_template('error.html', error=f"無法初始化授權流程：{error}"), 500
+            
+        # 設置回調 URL
+        flow.redirect_uri = url_for('oauth2callback', line_user_id=line_user_id, _external=True)
         
-    flow.redirect_uri = url_for('oauth2callback', line_user_id=line_user_id, _external=True)
-    authorization_url, state = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true'
-    )
-    session['state'] = state
-    return redirect(authorization_url)
+        # 生成授權 URL
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true'
+        )
+        
+        # 保存狀態
+        session['state'] = state
+        session['line_user_id'] = line_user_id
+        
+        logger.info(f"生成授權 URL 成功：{authorization_url}")
+        return redirect(authorization_url)
+    except Exception as e:
+        logger.error(f"授權過程發生錯誤：{str(e)}")
+        return render_template('error.html', error="授權過程發生錯誤，請稍後再試"), 500
 
 @app.route('/oauth2callback/<line_user_id>')
 def oauth2callback(line_user_id):
