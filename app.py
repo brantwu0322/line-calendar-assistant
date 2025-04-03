@@ -214,7 +214,17 @@ def get_google_calendar_service(line_user_id=None):
             # 如果提供了 line_user_id，嘗試獲取用戶的憑證
             creds = get_user_credentials(line_user_id)
             if not creds:
-                return None, "請先完成 Google Calendar 授權"
+                # 如果沒有憑證，返回授權 URL
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    'credentials.json',
+                    SCOPES,
+                    redirect_uri=url_for('oauth2callback', line_user_id=line_user_id, _external=True)
+                )
+                authorization_url, _ = flow.authorization_url(
+                    access_type='offline',
+                    include_granted_scopes='true'
+                )
+                return None, authorization_url
             
             try:
                 credentials = Credentials.from_authorized_user_info(creds)
@@ -592,10 +602,9 @@ def handle_text_message(event):
         if any(keyword in text for keyword in time_keywords):
             logger.info("檢測到行程相關訊息")
             # 檢查用戶授權
-            service, error = get_google_calendar_service(line_user_id)
-            if error:
-                logger.info(f"用戶未授權: {error}")
-                auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
+            service, auth_url = get_google_calendar_service(line_user_id)
+            if auth_url:
+                logger.info(f"用戶未授權，返回授權 URL: {auth_url}")
                 messaging_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
