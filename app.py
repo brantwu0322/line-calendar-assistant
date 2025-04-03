@@ -621,14 +621,10 @@ def handle_text_message(event):
             service, auth_url = get_google_calendar_service(line_user_id)
             if auth_url:
                 logger.info(f"用戶未授權，返回授權 URL: {auth_url}")
-                reply_message = {
-                    "type": "text",
-                    "text": f"請先完成 Google Calendar 授權：\n{auth_url}"
-                }
                 messaging_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[reply_message]
+                        messages=[TextMessage(text=f"請先完成 Google Calendar 授權：\n{auth_url}")]
                     )
                 )
                 return
@@ -639,51 +635,34 @@ def handle_text_message(event):
                 logger.info(f"解析結果: {event_info}")
                 success, result = create_calendar_event(service, event_info)
                 if success:
-                    reply_message = {
-                        "type": "text",
-                        "text": f"已為您建立行程：\n{result}"
-                    }
+                    reply_text = f"已為您建立行程：\n{result}"
                 else:
-                    reply_message = {
-                        "type": "text",
-                        "text": f"建立行程失敗：{result}"
-                    }
+                    reply_text = f"建立行程失敗：{result}"
             else:
-                reply_message = {
-                    "type": "text",
-                    "text": "抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫"
-                }
+                reply_text = "抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫"
             
             messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[reply_message]
+                    messages=[TextMessage(text=reply_text)]
                 )
             )
         else:
             # 一般對話
-            reply_message = {
-                "type": "text",
-                "text": "收到您的訊息了！"
-            }
             messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[reply_message]
+                    messages=[TextMessage(text="收到您的訊息了！")]
                 )
             )
     except Exception as e:
         logger.error(f"處理文字訊息時發生錯誤: {str(e)}")
         logger.error(f"錯誤詳情: {traceback.format_exc()}")
         try:
-            reply_message = {
-                "type": "text",
-                "text": "抱歉，系統發生錯誤，請稍後再試。"
-            }
             messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[reply_message]
+                    messages=[TextMessage(text="抱歉，系統發生錯誤，請稍後再試。")]
                 )
             )
         except Exception as reply_error:
