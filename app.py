@@ -20,7 +20,7 @@ from linebot.v3.messaging.models import (
 )
 from linebot.v3.webhooks.models import MessageContent
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
+from google_auth_oauthlib.flow import InstalledAppFlow, Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import speech_recognition as sr
@@ -215,7 +215,7 @@ def get_google_calendar_service(line_user_id=None):
             creds = get_user_credentials(line_user_id)
             if not creds:
                 # 如果沒有憑證，返回授權 URL
-                flow = InstalledAppFlow.from_client_secrets_file(
+                flow = Flow.from_client_secrets_file(
                     'credentials.json',
                     SCOPES,
                     redirect_uri=url_for('oauth2callback', line_user_id=line_user_id, _external=True)
@@ -248,7 +248,7 @@ def get_google_calendar_service(line_user_id=None):
                     json.dump(credentials_info, temp_file)
                     temp_file_path = temp_file.name
                 
-                flow = InstalledAppFlow.from_client_secrets_file(temp_file_path, SCOPES)
+                flow = Flow.from_client_secrets_file(temp_file_path, SCOPES)
                 os.unlink(temp_file_path)
                 return flow, None
             except json.JSONDecodeError:
