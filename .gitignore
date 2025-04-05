@@ -8,23 +8,8 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
+.env
+.venv/
 venv/
 ENV/
 
@@ -42,4 +27,11 @@ ENV/
 .env.local
 .env.development.local
 .env.test.local
-.env.production.local 
+.env.production.local
+
+# 應用程序特定
+credentials.json
+flask_session/
+users.db
+*.db
+Thumbs.db 

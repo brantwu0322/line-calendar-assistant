@@ -4,7 +4,7 @@ import sys
 import time
 from datetime import datetime, timedelta, time as datetime_time
 import re
-from flask import Flask, request, abort, redirect, url_for, session, render_template
+from flask import Flask, request, abort, redirect, url_for, session, render_template, flash, jsonify
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import (
@@ -12,9 +12,14 @@ from linebot.v3.webhooks import (
     TextMessageContent,
     AudioMessageContent
 )
-from linebot.v3.messaging import Configuration, MessagingApi, ApiClient
-from linebot.v3.messaging.models import (
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
     ReplyMessageRequest,
+    TextMessage
+)
+from linebot.v3.messaging.models import (
     AudioMessage
 )
 from linebot.v3.webhooks.models import MessageContent
@@ -43,6 +48,7 @@ import pytz
 from dotenv import load_dotenv
 from flask_session import Session
 from flask_wtf.csrf import CSRFProtect
+from werkzeug.security import generate_password_hash
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -56,19 +62,26 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'users.db')
 logger.info(f"Database path: {DB_PATH}")
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
+app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
 app.config['SESSION_TYPE'] = 'filesystem'
-app.config['WTF_CSRF_ENABLED'] = False  # 暫時禁用 CSRF 保護，以便調試
+app.config['WTF_CSRF_ENABLED'] = False  # 暫時禁用 CSRF 保護以進行調試
 csrf = CSRFProtect(app)
 Session(app)
 
-# LINE Bot 設定
-channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+# 初始化 LINE Bot
 channel_secret = os.getenv('LINE_CHANNEL_SECRET')
+channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+
+if not channel_secret or not channel_access_token:
+    app.logger.error('LINE Bot 配置缺失')
+    raise ValueError('LINE Bot 配置缺失')
+
+app.logger.info('Starting Flask application...')
+app.logger.info(f'LINE_CHANNEL_ACCESS_TOKEN: {channel_access_token[:10]}...')
+app.logger.info(f'LINE_CHANNEL_SECRET: {channel_secret[:10]}...')
+app.logger.info(f'GOOGLE_CALENDAR_ID: {os.getenv("GOOGLE_CALENDAR_ID")}')
 
 configuration = Configuration(access_token=channel_access_token)
-api_client = ApiClient(configuration)
-messaging_api = MessagingApi(api_client)
 handler = WebhookHandler(channel_secret)
 
 # Google Calendar API 設定
@@ -114,47 +127,61 @@ def require_authorization(func):
         return func(event, service, *args, **kwargs)
     return wrapper
 
-# 初始化資料庫
 def init_db():
+    """初始化資料庫"""
     try:
-        # 確保資料庫目錄存在
-        db_dir = os.path.dirname(DB_PATH)
-        if not os.path.exists(db_dir):
-            os.makedirs(db_dir)
-            logger.info(f"Created database directory: {db_dir}")
-        
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect('users.db')
         c = conn.cursor()
         
-        # 建立使用者表
-        c.execute('''CREATE TABLE IF NOT EXISTS users
-                     (line_user_id TEXT PRIMARY KEY,
-                      credentials TEXT,
-                      subscription_status TEXT DEFAULT 'free',
-                      subscription_end_date TEXT,
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        # 創建用戶表
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            line_user_id TEXT UNIQUE NOT NULL,
+            google_credentials TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
         
-        # 建立管理員表
-        c.execute('''CREATE TABLE IF NOT EXISTS admins
-                     (username TEXT PRIMARY KEY,
-                      password_hash TEXT,
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        # 創建管理員表
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS admins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
         
-        # 建立訂單表
-        c.execute('''CREATE TABLE IF NOT EXISTS orders
-                     (order_id TEXT PRIMARY KEY,
-                      line_user_id TEXT,
-                      amount INTEGER,
-                      status TEXT,
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                      FOREIGN KEY (line_user_id) REFERENCES users(line_user_id))''')
+        # 檢查是否已存在管理員帳號
+        c.execute('SELECT COUNT(*) FROM admins')
+        admin_count = c.fetchone()[0]
+        
+        if admin_count == 0:
+            # 創建默認管理員帳號
+            default_username = 'admin'
+            default_password = 'admin'  # 在實際環境中應使用更安全的密碼
+            hashed_password = generate_password_hash(default_password)
+            
+            c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
+                     (default_username, hashed_password))
+            
+            app.logger.info('已創建默認管理員帳號')
         
         conn.commit()
-        conn.close()
-        logger.info("Database initialized successfully")
+        app.logger.info('資料庫初始化完成')
+        
     except Exception as e:
-        logger.error(f"Error initializing database: {str(e)}")
-        raise
+        app.logger.error(f'初始化資料庫時發生錯誤: {str(e)}')
+        app.logger.error('詳細錯誤資訊：', exc_info=True)
+        
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+# 在應用啟動時初始化資料庫
+init_db()
 
 def get_all_users():
     """獲取所有已授權的使用者"""
@@ -174,7 +201,7 @@ def get_user_credentials(line_user_id):
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute('SELECT credentials FROM users WHERE line_user_id = ?', (line_user_id,))
+        c.execute('SELECT google_credentials FROM users WHERE line_user_id = ?', (line_user_id,))
         result = c.fetchone()
         conn.close()
         
@@ -190,7 +217,7 @@ def save_user_credentials(line_user_id, credentials):
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute('INSERT OR REPLACE INTO users (line_user_id, credentials) VALUES (?, ?)',
+        c.execute('INSERT OR REPLACE INTO users (line_user_id, google_credentials) VALUES (?, ?)',
                   (line_user_id, json.dumps({
                       'token': credentials.token,
                       'refresh_token': credentials.refresh_token,
@@ -274,22 +301,6 @@ def get_google_calendar_service(line_user_id=None):
     except Exception as e:
         logging.error(f"Google Calendar 服務發生未預期錯誤：{str(e)}")
         return None, f"系統錯誤：{str(e)}"
-
-# 在應用程式啟動時設置保活機制
-@app.before_first_request
-def setup_keep_alive():
-    """設置保活機制"""
-    import threading
-    import time
-    
-    def keep_alive_loop():
-        while True:
-            keep_alive()
-            time.sleep(1800)  # 每30分鐘執行一次
-    
-    thread = threading.Thread(target=keep_alive_loop, daemon=True)
-    thread.start()
-    logger.info("已啟動 LINE API 保活機制")
 
 # OpenAI API 設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
@@ -576,112 +587,142 @@ def create_calendar_event(service, event_data):
 
 @app.route("/callback", methods=['POST'])
 def callback():
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+    app.logger.info("收到 LINE 回調請求")
+    app.logger.debug(f"請求內容: {body}")
+    app.logger.debug(f"簽章: {signature}")
+
     try:
-        signature = request.headers['X-Line-Signature']
-        body = request.get_data(as_text=True)
-        logger.info("收到 LINE Webhook 請求")
-        logger.info(f"Signature: {signature}")
-        logger.info(f"Request body: {body}")
-        
-        try:
-            handler.handle(body, signature)
-        except InvalidSignatureError:
-            logger.error("無效的簽名")
-            abort(400)
-        except Exception as e:
-            logger.error(f"處理 Webhook 時發生錯誤: {str(e)}")
-            logger.error(f"錯誤類型: {type(e).__name__}")
-            logger.error(f"錯誤詳情: {traceback.format_exc()}")
-            return 'Error', 500
-            
-        return 'OK'
-    except Exception as e:
-        logger.error(f"Callback 路由發生錯誤: {str(e)}")
-        logger.error(f"錯誤類型: {type(e).__name__}")
-        logger.error(f"錯誤詳情: {traceback.format_exc()}")
-        return 'Error', 500
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+
+    return 'OK'
 
 @handler.add(MessageEvent, message=TextMessageContent)
-def handle_text_message(event):
+def handle_message(event):
     try:
+        user_id = event.source.user_id
         text = event.message.text
-        logger.info(f"收到文字訊息：{text}")
-        
-        # 檢查用戶狀態
-        line_user_id = event.source.user_id
-        logger.info(f"用戶 ID: {line_user_id}")
-        
-        # 檢查是否為行程相關訊息
-        time_keywords = ["點", "時", "早上", "上午", "下午", "晚上", "明天", "後天", "大後天", "下週", "下下週", "天後"]
-        
-        if any(keyword in text for keyword in time_keywords):
-            logger.info("檢測到行程相關訊息")
-            # 檢查用戶授權
-            service, auth_url = get_google_calendar_service(line_user_id)
-            if auth_url:
-                logger.info(f"用戶未授權，返回授權 URL: {auth_url}")
-                reply_message = {
-                    "type": "text",
-                    "text": f"請先完成 Google Calendar 授權：\n{auth_url}"
-                }
-                messaging_api.reply_message(
+        app.logger.info(f"收到文字訊息: {text}")
+        app.logger.debug(f"事件詳情: {event}")
+
+        # 檢查是否為測試消息
+        if text == "測試":
+            reply_text = "收到測試訊息！LINE Bot 正常運作中。"
+            app.logger.info(f"準備回覆訊息: {reply_text}")
+            
+            with ApiClient(configuration) as api_client:
+                messaging_api = MessagingApi(api_client)
+                response = messaging_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[reply_message]
+                        messages=[{
+                            "type": "text",
+                            "text": reply_text
+                        }]
                     )
                 )
-                return
+            return
+
+        # 解析日期時間
+        app.logger.info(f"正在解析文字: {text}")
+        parsed_datetime, summary, is_recurring = parse_datetime_and_summary(text)
+        
+        if not parsed_datetime:
+            reply_text = "抱歉，我無法理解您指定的時間。請使用更明確的時間表達方式，例如：「明天下午3點開會」"
+            with ApiClient(configuration) as api_client:
+                messaging_api = MessagingApi(api_client)
+                response = messaging_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[{
+                            "type": "text",
+                            "text": reply_text
+                        }]
+                    )
+                )
+            return
+
+        app.logger.info(f"解析結果: 日期={parsed_datetime}, 摘要={summary}, 重複={is_recurring}")
+
+        # 檢查用戶是否已授權
+        if not is_user_authorized(user_id):
+            auth_url = get_authorization_url(user_id)
+            reply_text = f"請先授權我訪問您的 Google 日曆：\n{auth_url}"
             
-            # 解析事件資訊
-            event_info = parse_event_text(text)
-            if event_info:
-                logger.info(f"解析結果: {event_info}")
-                success, result = create_calendar_event(service, event_info)
-                if success:
-                    reply_text = f"已為您建立行程：\n{result}"
-                else:
-                    reply_text = f"建立行程失敗：{result}"
-            else:
-                reply_text = "抱歉，我無法理解您的行程資訊。請使用以下格式：\n1. 明天下午兩點跟客戶開會\n2. 下週三早上九點去看牙醫"
+            with ApiClient(configuration) as api_client:
+                messaging_api = MessagingApi(api_client)
+                response = messaging_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[{
+                            "type": "text",
+                            "text": reply_text
+                        }]
+                    )
+                )
+            return
+
+        # 創建日曆事件
+        calendar_service = get_google_calendar_service(user_id)
+        if not calendar_service:
+            reply_text = "無法連接到 Google 日曆服務，請重新授權：" + get_authorization_url(user_id)
             
-            reply_message = {
-                "type": "text",
-                "text": reply_text
-            }
-            messaging_api.reply_message(
+            with ApiClient(configuration) as api_client:
+                messaging_api = MessagingApi(api_client)
+                response = messaging_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[{
+                            "type": "text",
+                            "text": reply_text
+                        }]
+                    )
+                )
+            return
+
+        event_link = create_calendar_event(calendar_service, parsed_datetime)
+        app.logger.info(f"成功建立事件: {event_link}")
+
+        reply_text = f"已成功建立行程：{summary}\n{event_link}"
+        app.logger.info(f"準備回覆訊息: {reply_text}")
+        
+        with ApiClient(configuration) as api_client:
+            messaging_api = MessagingApi(api_client)
+            response = messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[reply_message]
+                    messages=[{
+                        "type": "text",
+                        "text": reply_text
+                    }]
                 )
             )
-        else:
-            # 一般對話
-            reply_message = {
-                "type": "text",
-                "text": "收到您的訊息了！"
-            }
-            messaging_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[reply_message]
-                )
-            )
+
     except Exception as e:
-        logger.error(f"處理文字訊息時發生錯誤: {str(e)}")
-        logger.error(f"錯誤詳情: {traceback.format_exc()}")
+        app.logger.error(f"處理訊息時發生錯誤: {str(e)}")
+        app.logger.error("詳細錯誤資訊：", exc_info=True)
+        
+        error_message = "抱歉，處理您的請求時發生錯誤。請稍後再試。"
         try:
-            reply_message = {
-                "type": "text",
-                "text": "抱歉，系統發生錯誤，請稍後再試。"
-            }
-            messaging_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[reply_message]
+            with ApiClient(configuration) as api_client:
+                messaging_api = MessagingApi(api_client)
+                response = messaging_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[{
+                            "type": "text",
+                            "text": error_message
+                        }]
+                    )
                 )
-            )
         except Exception as reply_error:
-            logger.error(f"回覆錯誤訊息時發生錯誤: {str(reply_error)}")
+            app.logger.error(f"發送錯誤訊息時也發生錯誤: {str(reply_error)}")
+            app.logger.error("詳細錯誤資訊：", exc_info=True)
+
+    app.logger.info("成功處理 LINE 回調請求")
 
 @handler.add(MessageEvent, message=AudioMessageContent)
 @require_authorization
@@ -917,6 +958,13 @@ def admin_dashboard():
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
+        
+        # 檢查資料庫連接
+        c.execute('SELECT 1')
+        if not c.fetchone():
+            raise Exception("Database connection test failed")
+            
+        # 獲取使用者資料
         c.execute('''SELECT u.line_user_id, u.subscription_status, u.subscription_end_date,
                             u.created_at, COUNT(o.order_id) as order_count
                      FROM users u
@@ -924,9 +972,12 @@ def admin_dashboard():
                      GROUP BY u.line_user_id''')
         users = c.fetchall()
         conn.close()
+        
+        logger.info(f"Retrieved {len(users)} users from database")
         return render_template('admin_dashboard.html', users=users)
     except Exception as e:
         logger.error(f"Error in admin dashboard: {str(e)}")
+        logger.error(f"Error details: {traceback.format_exc()}")
         return render_template('error.html', error="資料庫存取錯誤"), 500
 
 @app.route('/admin/user/<line_user_id>/remove', methods=['POST'])
@@ -1016,7 +1067,7 @@ def verify_admin(username, password):
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute('SELECT password_hash FROM admins WHERE username = ?', (username,))
+        c.execute('SELECT password FROM admins WHERE username = ?', (username,))
         result = c.fetchone()
         conn.close()
         
@@ -1044,7 +1095,7 @@ def init_admin():
         c.execute('SELECT COUNT(*) FROM admins')
         if c.fetchone()[0] == 0:
             # 創建預設管理員帳號
-            c.execute('''INSERT INTO admins (username, password_hash)
+            c.execute('''INSERT INTO admins (username, password)
                         VALUES (?, ?)''', ('admin', 'admin'))
             conn.commit()
             logger.info("Created default admin account")
@@ -1060,11 +1111,35 @@ def admin_login():
         password = request.form.get('password')
         
         if verify_admin(username, password):
-            session['admin'] = username
+            session['admin_logged_in'] = True
             return redirect(url_for('admin_dashboard'))
-        return render_template('admin_login.html', error='登入失敗，請檢查帳號密碼')
+        else:
+            flash('用戶名或密碼錯誤')
     
     return render_template('admin_login.html')
+
+@app.route('/admin/change_password', methods=['POST'])
+def change_admin_password():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': '請先登入'}), 401
+    
+    current_password = request.form.get('current_password')
+    new_password = request.form.get('new_password')
+    
+    if not verify_admin('admin', current_password):
+        return jsonify({'success': False, 'message': '當前密碼錯誤'}), 400
+    
+    try:
+        conn = sqlite3.connect('users.db')
+        c = conn.cursor()
+        c.execute('UPDATE admins SET password = ? WHERE username = ?',
+                 (generate_password_hash(new_password), 'admin'))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': '密碼已成功更新'})
+    except Exception as e:
+        app.logger.error(f'更改密碼時發生錯誤: {str(e)}')
+        return jsonify({'success': False, 'message': '更新密碼時發生錯誤'}), 500
 
 @app.errorhandler(404)
 def page_not_found(e):
