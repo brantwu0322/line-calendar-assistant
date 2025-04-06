@@ -363,24 +363,32 @@ def save_user_credentials(conn, line_user_id, credentials):
     
     # 獲取用戶的 Google 帳號資訊
     try:
+        # 使用 credentials 創建 OAuth2 服務
         service = build('oauth2', 'v2', credentials=credentials)
+        # 獲取用戶資訊
         user_info = service.userinfo().get().execute()
         google_email = user_info.get('email')
+        logger.info(f"成功獲取 Google 帳號資訊: {google_email}")
     except Exception as e:
         logger.error(f"獲取 Google 帳號資訊時發生錯誤: {str(e)}")
+        # 如果無法獲取 email，則設為 None
         google_email = None
     
+    # 將憑證轉換為字典格式
+    creds_dict = {
+        'token': credentials.token,
+        'refresh_token': credentials.refresh_token,
+        'token_uri': credentials.token_uri,
+        'client_id': credentials.client_id,
+        'client_secret': credentials.client_secret,
+        'scopes': credentials.scopes
+    }
+    
+    # 儲存到資料庫
     c.execute('INSERT OR REPLACE INTO users (line_user_id, google_credentials, google_email) VALUES (?, ?, ?)',
-              (line_user_id, json.dumps({
-                  'token': credentials.token,
-                  'refresh_token': credentials.refresh_token,
-                  'token_uri': credentials.token_uri,
-                  'client_id': credentials.client_id,
-                  'client_secret': credentials.client_secret,
-                  'scopes': credentials.scopes
-              }), google_email))
+              (line_user_id, json.dumps(creds_dict), google_email))
     conn.commit()
-    logger.info(f"Saved credentials for user: {line_user_id}")
+    logger.info(f"已儲存用戶 {line_user_id} 的憑證")
 
 def get_google_calendar_service(line_user_id=None):
     """取得使用者的 Google Calendar 服務"""
