@@ -600,17 +600,20 @@ def parse_event_text(text):
             target_weekday = weekday_map[date_str[2]]
             current_weekday = today.weekday()
             
-            # 計算到下週的天數
-            days_to_next_week = 7 - current_weekday + target_weekday
+            # 計算到下週目標日期的天數
+            days_ahead = target_weekday - current_weekday  # 目標日期與當前日期的差距
             
-            # 如果目標日期在本週的同一天或之後，需要再加一週
-            if target_weekday >= current_weekday:
-                days_to_next_week += 7
+            # 確保是下週的日期
+            if days_ahead <= 0:  # 如果目標日期在本週，加 7 天到下週
+                days_ahead += 7
+            
+            # 再加 7 天確保是下週
+            days_ahead += 7
             
             # 計算目標日期
-            target_date = today + timedelta(days=days_to_next_week)
+            target_date = today + timedelta(days=days_ahead)
             
-            logger.info(f"計算下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，需要 {days_to_next_week} 天")
+            logger.info(f"計算下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，需要 {days_ahead} 天")
         elif date_str.startswith('下下週'):
             weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
             target_weekday = weekday_map[date_str[3]]
