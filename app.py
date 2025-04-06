@@ -87,7 +87,8 @@ handler = WebhookHandler(channel_secret)
 # Google Calendar API 設定
 SCOPES = [
     'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/userinfo.email'  # 新增獲取用戶 email 的權限
+    'https://www.googleapis.com/auth/userinfo.email',
+    'openid'  # 新增 openid 範圍
 ]
 API_SERVICE_NAME = 'calendar'
 API_VERSION = 'v3'
@@ -457,7 +458,9 @@ def get_google_calendar_service(line_user_id=None):
                         access_type='offline',
                         include_granted_scopes='true',
                         state=line_user_id,
-                        prompt='consent'  # 強制顯示同意畫面
+                        prompt='consent',  # 強制顯示同意畫面
+                        login_hint='',  # 允許用戶選擇帳號
+                        openid_realm=app_url  # 設定 OpenID realm
                     )
                     
                     logger.info(f"生成授權 URL: {authorization_url}")
@@ -509,7 +512,8 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 # Google Calendar API 設定
 SCOPES = [
     'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/userinfo.email'  # 新增獲取用戶 email 的權限
+    'https://www.googleapis.com/auth/userinfo.email',
+    'openid'  # 新增 openid 範圍
 ]
 
 @with_error_handling
@@ -985,12 +989,14 @@ def authorize(line_user_id):
                 redirect_uri=redirect_uri
             )
             
-            # 生成授權 URL
+            # 生成授權 URL，加入額外參數
             authorization_url, _ = flow.authorization_url(
                 access_type='offline',
                 include_granted_scopes='true',
                 state=line_user_id,
-                prompt='consent'  # 強制顯示同意畫面
+                prompt='consent',  # 強制顯示同意畫面
+                login_hint='',  # 允許用戶選擇帳號
+                openid_realm=app_url  # 設定 OpenID realm
             )
             
             logger.info(f"生成授權 URL: {authorization_url}")
