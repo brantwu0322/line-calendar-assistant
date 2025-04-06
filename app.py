@@ -875,7 +875,7 @@ def handle_message(event):
                         message += f"📝 {event['summary']}\n"
                         if event.get('description'):
                             message += f"📋 {event['description']}\n"
-                        message += "─" * 20 + "\n"
+                        message += "─" * 13 + "\n"
 
                     # 如果訊息太長，分多次發送
                     if len(message) > 5000:
