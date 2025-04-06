@@ -585,20 +585,116 @@ def create_calendar_event(service, event_data):
         logger.exception("詳細錯誤資訊：")
         return False, str(e)
 
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
-    app.logger.info("收到 LINE 回調請求")
-    app.logger.debug(f"請求內容: {body}")
-    app.logger.debug(f"簽章: {signature}")
-
+def parse_datetime_and_summary(text):
+    """解析文字訊息中的日期時間和摘要"""
     try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
+        # 使用 OpenAI API 解析文字
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "你是一個專業的日期時間解析助手。請從文字中提取日期時間和事件摘要。"},
+                {"role": "user", "content": f"請從以下文字中提取日期時間和事件摘要：{text}"}
+            ]
+        )
+        
+        # 解析回應
+        result = response.choices[0].message.content
+        app.logger.info(f"OpenAI 解析結果: {result}")
+        
+        # 提取日期時間和摘要
+        datetime_pattern = r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2})'
+        match = re.search(datetime_pattern, result)
+        if match:
+            parsed_datetime = datetime.strptime(match.group(1), '%Y-%m-%d %H:%M')
+            summary = result.split('\n')[0].strip()
+            is_recurring = '重複' in result or '每週' in result or '每月' in result
+            return parsed_datetime, summary, is_recurring
+        else:
+            return None, None, False
+    except Exception as e:
+        app.logger.error(f"解析日期時間時發生錯誤: {str(e)}")
+        return None, None, False
 
-    return 'OK'
+@app.route('/callback', methods=['POST'])
+def callback():
+    """處理 LINE Bot 的回調請求"""
+    try:
+        app.logger.info('收到 LINE 回調請求')
+        signature = request.headers['X-Line-Signature']
+        body = request.get_data(as_text=True)
+        
+        # 驗證簽名
+        handler.handle(body, signature)
+        
+        # 解析事件
+        events = json.loads(body)['events']
+        for event in events:
+            if event['type'] == 'message' and event['message']['type'] == 'text':
+                handle_message(event)
+        
+        app.logger.info('成功處理 LINE 回調請求')
+        return 'OK'
+    except InvalidSignatureError:
+        app.logger.error('無效的簽名')
+        abort(400)
+    except Exception as e:
+        app.logger.error(f'處理回調時發生錯誤: {str(e)}')
+        abort(500)
+
+def handle_message(event):
+    """處理文字訊息"""
+    try:
+        text = event['message']['text']
+        user_id = event['source']['userId']
+        app.logger.info(f'收到文字訊息: {text}')
+        
+        # 解析日期時間和摘要
+        app.logger.info(f'正在解析文字: {text}')
+        parsed_datetime, summary, is_recurring = parse_datetime_and_summary(text)
+        
+        if parsed_datetime and summary:
+            # 檢查用戶是否已授權
+            if not is_user_authorized(user_id):
+                reply_text = f"您需要先授權 Google Calendar 才能使用此功能。\n請點擊以下連結進行授權：\n{get_authorization_url(user_id)}"
+            else:
+                # 創建日曆事件
+                event_id = create_calendar_event(user_id, parsed_datetime, summary, is_recurring)
+                if event_id:
+                    reply_text = f"已成功創建日曆事件：\n{summary}\n時間：{parsed_datetime.strftime('%Y-%m-%d %H:%M')}"
+                else:
+                    reply_text = "創建日曆事件失敗，請稍後再試。"
+        else:
+            reply_text = "無法識別日期時間，請使用以下格式：\n'週五下午三點開會' 或 '明天上午十點會議'"
+        
+        # 回覆用戶
+        reply_message(event['replyToken'], reply_text)
+        
+    except Exception as e:
+        app.logger.error(f'處理訊息時發生錯誤: {str(e)}')
+        app.logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
+        try:
+            reply_message(event['replyToken'], "處理您的訊息時發生錯誤，請稍後再試。")
+        except Exception as e:
+            app.logger.error(f'發送錯誤訊息時也發生錯誤: {str(e)}')
+            app.logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
+
+def reply_message(reply_token, text):
+    """回覆 LINE 訊息"""
+    try:
+        if not text:
+            app.logger.error('嘗試發送空訊息')
+            return
+            
+        messaging_api = MessagingApi(Configuration(access_token=channel_access_token))
+        messaging_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[TextMessage(text=text)]
+            )
+        )
+    except Exception as e:
+        app.logger.error(f'發送訊息時發生錯誤: {str(e)}')
+        raise
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
