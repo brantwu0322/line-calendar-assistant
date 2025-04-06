@@ -370,15 +370,22 @@ def get_google_calendar_service(line_user_id=None):
                         json.dump(credentials_info, temp_file)
                         temp_file_path = temp_file.name
                     
+                    # 使用查詢參數而不是路徑參數
+                    redirect_uri = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com')
+                    redirect_uri = f"{redirect_uri.rstrip('/')}/oauth2callback"
+                    
                     flow = Flow.from_client_secrets_file(
                         temp_file_path,
                         SCOPES,
-                        redirect_uri=url_for('oauth2callback', line_user_id=line_user_id, _external=True)
+                        redirect_uri=redirect_uri
                     )
                     os.unlink(temp_file_path)
+                    
+                    # 在授權 URL 中加入 line_user_id 參數
                     authorization_url, _ = flow.authorization_url(
                         access_type='offline',
-                        include_granted_scopes='true'
+                        include_granted_scopes='true',
+                        state=line_user_id  # 使用 state 參數傳遞 line_user_id
                     )
                     return None, authorization_url
                 except json.JSONDecodeError:
@@ -398,25 +405,7 @@ def get_google_calendar_service(line_user_id=None):
                 logger.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
                 return None, "Google Calendar 服務發生錯誤"
         else:
-            # 如果沒有提供 line_user_id，使用環境變數中的憑證
-            credentials_json = os.getenv('GOOGLE_CREDENTIALS')
-            if not credentials_json:
-                return None, "未設定 GOOGLE_CREDENTIALS 環境變數"
-            
-            try:
-                credentials_info = json.loads(credentials_json)
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-                    json.dump(credentials_info, temp_file)
-                    temp_file_path = temp_file.name
-                
-                flow = Flow.from_client_secrets_file(temp_file_path, SCOPES)
-                os.unlink(temp_file_path)
-                return flow, None
-            except json.JSONDecodeError:
-                return None, "GOOGLE_CREDENTIALS 環境變數格式錯誤"
-            except Exception as e:
-                logger.error(f"初始化 Google Calendar 流程時發生錯誤：{str(e)}")
-                return None, f"無法初始化 Google Calendar 授權流程：{str(e)}"
+            return None, "未提供用戶 ID"
     except Exception as e:
         logger.error(f"Google Calendar 服務發生未預期錯誤：{str(e)}")
         return None, f"系統錯誤：{str(e)}"
@@ -767,70 +756,110 @@ def handle_message(event):
 @with_error_handling
 def authorize(line_user_id):
     """處理 Google Calendar 授權"""
-    # 初始化 OAuth 流程
-    flow, error = get_google_calendar_service()
-    if error:
-        logger.error(f"初始化 OAuth 流程失敗：{error}")
-        return render_template('error.html', error=f"無法初始化授權流程：{error}"), 500
-        
-    # 設置回調 URL
-    flow.redirect_uri = url_for('oauth2callback', line_user_id=line_user_id, _external=True)
-    
-    # 生成授權 URL
-    authorization_url, state = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true'
-    )
-    
-    # 保存狀態
-    session['state'] = state
-    session['line_user_id'] = line_user_id
-    
-    logger.info(f"生成授權 URL 成功：{authorization_url}")
-    return redirect(authorization_url)
-
-@app.route('/oauth2callback/<line_user_id>')
-@with_error_handling
-def oauth2callback(line_user_id):
-    """處理 OAuth2 回調"""
-    state = session.get('state')
-    if not state:
-        logger.error("Session state not found")
-        return render_template('error.html', error="授權狀態無效，請重新開始授權流程"), 400
-
-    # 從環境變數獲取憑證
-    credentials_json = os.getenv('GOOGLE_CREDENTIALS')
-    if not credentials_json:
-        logger.error("GOOGLE_CREDENTIALS not found in environment variables")
-        return render_template('error.html', error="系統設定錯誤，請聯繫管理員"), 500
-
-    # 創建臨時憑證文件
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-        json.dump(json.loads(credentials_json), temp_file)
-        temp_file_path = temp_file.name
-
     try:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            temp_file_path,
-            ['https://www.googleapis.com/auth/calendar'],
-            state=state
-        )
-        flow.redirect_uri = url_for('oauth2callback', line_user_id=line_user_id, _external=True)
+        # 從環境變數獲取憑證
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+        if not credentials_json:
+            logger.error("GOOGLE_CREDENTIALS not found in environment variables")
+            return render_template('error.html', error="系統設定錯誤，請聯繫管理員"), 500
+
+        # 創建臨時憑證文件
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+            json.dump(json.loads(credentials_json), temp_file)
+            temp_file_path = temp_file.name
+
+        try:
+            # 使用完整的 URL
+            redirect_uri = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com')
+            redirect_uri = f"{redirect_uri.rstrip('/')}/oauth2callback"
+
+            flow = Flow.from_client_secrets_file(
+                temp_file_path,
+                SCOPES,
+                redirect_uri=redirect_uri
+            )
+            
+            # 在授權 URL 中加入 line_user_id 參數
+            authorization_url, _ = flow.authorization_url(
+                access_type='offline',
+                include_granted_scopes='true',
+                state=line_user_id  # 使用 state 參數傳遞 line_user_id
+            )
+            
+            logger.info(f"生成授權 URL 成功：{authorization_url}")
+            return redirect(authorization_url)
         
-        authorization_response = request.url
-        flow.fetch_token(authorization_response=authorization_response)
-        credentials = flow.credentials
+        except Exception as e:
+            logger.error(f"OAuth flow error: {str(e)}")
+            return render_template('error.html', error=f"授權過程發生錯誤：{str(e)}"), 500
         
-        # 儲存認證資訊
-        save_user_credentials(line_user_id, credentials)
+        finally:
+            # 清理臨時文件
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+                logger.info(f"Cleaned up temporary file: {temp_file_path}")
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in authorize: {str(e)}")
+        return render_template('error.html', error=f"系統錯誤：{str(e)}"), 500
+
+@app.route('/oauth2callback')
+@with_error_handling
+def oauth2callback():
+    """處理 OAuth2 回調"""
+    try:
+        # 從 state 參數中獲取 line_user_id
+        line_user_id = request.args.get('state')
+        if not line_user_id:
+            logger.error("Missing line_user_id in state parameter")
+            return render_template('error.html', error="授權過程發生錯誤：缺少用戶識別資訊"), 400
+
+        # 從環境變數獲取憑證
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+        if not credentials_json:
+            logger.error("GOOGLE_CREDENTIALS not found in environment variables")
+            return render_template('error.html', error="系統設定錯誤，請聯繫管理員"), 500
+
+        # 創建臨時憑證文件
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+            json.dump(json.loads(credentials_json), temp_file)
+            temp_file_path = temp_file.name
+
+        try:
+            # 使用查詢參數而不是路徑參數
+            redirect_uri = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com')
+            redirect_uri = f"{redirect_uri.rstrip('/')}/oauth2callback"
+
+            flow = Flow.from_client_secrets_file(
+                temp_file_path,
+                SCOPES,
+                redirect_uri=redirect_uri
+            )
+            
+            # 獲取授權碼
+            flow.fetch_token(authorization_response=request.url)
+            
+            credentials = flow.credentials
+            
+            # 儲存認證資訊
+            save_user_credentials(line_user_id, credentials)
+            
+            logger.info(f"Successfully authorized user: {line_user_id}")
+            return render_template('success.html', message="授權成功！請回到 LINE 繼續使用。")
         
-        logger.info(f"Successfully authorized user: {line_user_id}")
-        return render_template('success.html', message="授權成功！請回到 LINE 繼續使用。")
-    finally:
-        # 清理臨時文件
-        if os.path.exists(temp_file_path):
-            os.unlink(temp_file_path)
-            logger.info(f"Cleaned up temporary file: {temp_file_path}")
+        except Exception as e:
+            logger.error(f"OAuth callback error: {str(e)}")
+            return render_template('error.html', error=f"授權過程發生錯誤：{str(e)}"), 500
+        
+        finally:
+            # 清理臨時文件
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+                logger.info(f"Cleaned up temporary file: {temp_file_path}")
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in oauth2callback: {str(e)}")
+        return render_template('error.html', error=f"系統錯誤：{str(e)}"), 500
 
 @app.route('/admin/login', methods=['GET', 'POST'])
 @with_error_handling
