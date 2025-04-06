@@ -1034,6 +1034,39 @@ def authorize(line_user_id):
         logger.error(f"Unexpected error in authorize: {str(e)}")
         return render_template('error.html', error=f"系統錯誤：{str(e)}"), 500
 
+@with_db_connection
+def create_or_update_user(conn, line_user_id, google_email, credentials_json):
+    """創建或更新用戶資料"""
+    try:
+        c = conn.cursor()
+        # 檢查用戶是否存在
+        c.execute('SELECT 1 FROM users WHERE line_user_id = ?', (line_user_id,))
+        user_exists = c.fetchone() is not None
+        
+        if user_exists:
+            # 更新現有用戶
+            c.execute('''
+                UPDATE users 
+                SET google_email = ?, google_credentials = ?
+                WHERE line_user_id = ?
+            ''', (google_email, credentials_json, line_user_id))
+            logger.info(f"更新用戶資料：{line_user_id}")
+        else:
+            # 創建新用戶
+            c.execute('''
+                INSERT INTO users 
+                (line_user_id, google_email, google_credentials, subscription_status, subscription_end_date)
+                VALUES (?, ?, ?, 'free', NULL)
+            ''', (line_user_id, google_email, credentials_json))
+            logger.info(f"創建新用戶：{line_user_id}")
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"創建或更新用戶時發生錯誤：{str(e)}")
+        conn.rollback()
+        return False
+
 @app.route('/oauth2callback')
 @with_error_handling
 def oauth2callback():
@@ -1089,26 +1122,22 @@ def oauth2callback():
             user_email = user_info.get('email')
             logger.info(f"獲取到用戶 email: {user_email}")
             
-            # 更新資料庫中的用戶資訊
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute('''
-                UPDATE users 
-                SET google_email = ?, google_credentials = ?
-                WHERE line_user_id = ?
-            ''', (user_email, json.dumps({
+            # 準備憑證 JSON
+            credentials_dict = {
                 'token': credentials.token,
                 'refresh_token': credentials.refresh_token,
                 'token_uri': credentials.token_uri,
                 'client_id': credentials.client_id,
                 'client_secret': credentials.client_secret,
                 'scopes': credentials.scopes
-            }), line_user_id))
-            conn.commit()
-            conn.close()
+            }
             
-            logger.info(f"Successfully authorized user: {line_user_id} with email: {user_email}")
-            return render_template('success.html', message="授權成功！請回到 LINE 繼續使用。")
+            # 創建或更新用戶資料
+            if create_or_update_user(line_user_id, user_email, json.dumps(credentials_dict)):
+                logger.info(f"Successfully authorized user: {line_user_id} with email: {user_email}")
+                return render_template('success.html', message="授權成功！請回到 LINE 繼續使用。")
+            else:
+                return render_template('error.html', error="儲存用戶資料時發生錯誤"), 500
         
         except Exception as e:
             logger.error(f"OAuth callback error: {str(e)}")
