@@ -370,12 +370,15 @@ def get_google_calendar_service(line_user_id=None):
                         json.dump(credentials_info, temp_file)
                         temp_file_path = temp_file.name
                     
-                    # 確保使用完整的 URL
+                    # 確保使用 HTTPS
                     app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
+                    if not app_url.startswith('https://'):
+                        app_url = f"https://{app_url.replace('http://', '')}"
                     redirect_uri = f"{app_url}/oauth2callback"
                     
                     logger.info(f"使用重定向 URI: {redirect_uri}")
                     
+                    # 設定 OAuth 2.0 流程
                     flow = Flow.from_client_secrets_file(
                         temp_file_path,
                         SCOPES,
@@ -790,8 +793,10 @@ def authorize(line_user_id):
             temp_file_path = temp_file.name
 
         try:
-            # 確保使用完整的 URL
+            # 確保使用 HTTPS
             app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
+            if not app_url.startswith('https://'):
+                app_url = f"https://{app_url.replace('http://', '')}"
             redirect_uri = f"{app_url}/oauth2callback"
             
             logger.info(f"授權使用重定向 URI: {redirect_uri}")
@@ -850,20 +855,29 @@ def oauth2callback():
             temp_file_path = temp_file.name
 
         try:
-            # 確保使用完整的 URL
+            # 確保使用 HTTPS
             app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
+            if not app_url.startswith('https://'):
+                app_url = f"https://{app_url.replace('http://', '')}"
             redirect_uri = f"{app_url}/oauth2callback"
             
             logger.info(f"回調使用重定向 URI: {redirect_uri}")
             
+            # 設定 OAuth 2.0 流程
             flow = Flow.from_client_secrets_file(
                 temp_file_path,
                 SCOPES,
                 redirect_uri=redirect_uri
             )
             
+            # 確保回調 URL 使用 HTTPS
+            callback_url = request.url
+            if callback_url.startswith('http://'):
+                callback_url = f"https://{callback_url[7:]}"
+            logger.info(f"處理回調 URL: {callback_url}")
+            
             # 獲取授權碼
-            flow.fetch_token(authorization_response=request.url)
+            flow.fetch_token(authorization_response=callback_url)
             
             credentials = flow.credentials
             
