@@ -753,6 +753,7 @@ def handle_message(event):
     try:
         text = event.message.text
         user_id = event.source.user_id
+        reply_token = event.reply_token
         logger.info(f'收到文字訊息: {text}')
         
         # 檢查是否為查詢行程的指令
@@ -770,9 +771,9 @@ def handle_message(event):
                     f"{error}\n\n"
                     "完成授權後，請再次傳送「查詢行程」給我 🙂"
                 )
-                reply_text = auth_message
+                send_line_message(reply_token, auth_message)
             elif error:
-                reply_text = f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏"
+                send_line_message(reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
             else:
                 try:
                     # 獲取未來 30 天的行程
@@ -788,7 +789,7 @@ def handle_message(event):
                     ).execute()
                     
                     if not events.get('items'):
-                        reply_text = "您目前沒有未來的行程安排喔！"
+                        send_line_message(reply_token, "您目前沒有未來的行程安排喔！")
                     else:
                         reply_text = "您未來的行程如下：\n\n"
                         for event in events['items']:
@@ -807,9 +808,10 @@ def handle_message(event):
                             reply_text += f"📝 {event['summary']}\n\n"
                         
                         reply_text += "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
+                        send_line_message(reply_token, reply_text)
                 except Exception as e:
                     logger.error(f"查詢行程時發生錯誤: {str(e)}")
-                    reply_text = "抱歉，我在查詢行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。"
+                    send_line_message(reply_token, "抱歉，我在查詢行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
         else:
             # 解析日期時間和摘要
             logger.info(f'正在解析文字: {text}')
@@ -829,9 +831,9 @@ def handle_message(event):
                         f"{error}\n\n"
                         "完成授權後，請再次傳送您要安排的行程給我 🙂"
                     )
-                    reply_text = auth_message
+                    send_line_message(reply_token, auth_message)
                 elif error:
-                    reply_text = f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏"
+                    send_line_message(reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
                 else:
                     # 創建日曆事件
                     success, result = create_calendar_event(service, event_data)
@@ -862,8 +864,9 @@ def handle_message(event):
                                 f"🕒 時間：{formatted_start} - {formatted_end}\n\n"
                                 "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
                             )
+                        send_line_message(reply_token, reply_text)
                     else:
-                        reply_text = "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。"
+                        send_line_message(reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
             else:
                 reply_text = (
                     "抱歉，我無法理解您想安排的時間 😅\n\n"
@@ -875,17 +878,14 @@ def handle_message(event):
                     "✨ 「三天後下午兩點半開會預計45分鐘」\n\n"
                     "或是輸入「查詢行程」來查看您未來的行程安排。"
                 )
-        
-        # 回覆用戶
-        if reply_text:
-            send_line_message(event.reply_token, reply_text)
+                send_line_message(reply_token, reply_text)
     
     except Exception as e:
         logger.error(f'處理訊息時發生錯誤: {str(e)}')
         logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
         try:
             send_line_message(
-                event.reply_token, 
+                reply_token, 
                 "非常抱歉，我在處理您的訊息時遇到了問題 😅\n請稍後再試一次，或聯繫系統管理員協助。"
             )
         except Exception as e:
