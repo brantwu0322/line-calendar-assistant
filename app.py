@@ -228,10 +228,25 @@ def init_db(conn):
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         line_user_id TEXT UNIQUE NOT NULL,
         google_credentials TEXT,
+        google_email TEXT,
         subscription_status TEXT DEFAULT 'free',
         subscription_end_date TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # 創建行程記錄表
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        line_user_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
     )
     ''')
     
@@ -345,7 +360,17 @@ def get_user_credentials(conn, line_user_id):
 def save_user_credentials(conn, line_user_id, credentials):
     """保存用戶認證"""
     c = conn.cursor()
-    c.execute('INSERT OR REPLACE INTO users (line_user_id, google_credentials) VALUES (?, ?)',
+    
+    # 獲取用戶的 Google 帳號資訊
+    try:
+        service = build('oauth2', 'v2', credentials=credentials)
+        user_info = service.userinfo().get().execute()
+        google_email = user_info.get('email')
+    except Exception as e:
+        logger.error(f"獲取 Google 帳號資訊時發生錯誤: {str(e)}")
+        google_email = None
+    
+    c.execute('INSERT OR REPLACE INTO users (line_user_id, google_credentials, google_email) VALUES (?, ?, ?)',
               (line_user_id, json.dumps({
                   'token': credentials.token,
                   'refresh_token': credentials.refresh_token,
@@ -353,7 +378,7 @@ def save_user_credentials(conn, line_user_id, credentials):
                   'client_id': credentials.client_id,
                   'client_secret': credentials.client_secret,
                   'scopes': credentials.scopes
-              })))
+              }), google_email))
     conn.commit()
     logger.info(f"Saved credentials for user: {line_user_id}")
 
@@ -463,6 +488,7 @@ def parse_event_text(text):
                         "time_period": "上午|下午",
                         "hour": "小時數字",
                         "minute": "分鐘數字",
+                        "duration_minutes": "行程持續時間（分鐘）",
                         "is_recurring": false,
                         "recurrence_count": null,
                         "summary": "事件描述"
@@ -477,6 +503,8 @@ def parse_event_text(text):
                        - "點"、"時" 都表示小時
                        - "分" 表示分鐘
                        - "半" 表示 30 分
+                       - 如果沒有指定持續時間，預設為 60 分鐘
+                       - 持續時間可以用"分鐘"、"小時"、"半小時"等表示
                     
                     2. 日期解析：
                        - "今天" 指今天
@@ -497,59 +525,40 @@ def parse_event_text(text):
                        - 移除時間相關的描述詞
                     
                     範例：
-                    1. 輸入：「明天下午兩點跟客戶開會」
+                    1. 輸入：「明天下午兩點開會預計30分鐘」
                        輸出：{
                            "date_type": "明天",
                            "time_period": "下午",
                            "hour": "2",
                            "minute": "0",
+                           "duration_minutes": "30",
                            "is_recurring": false,
                            "recurrence_count": null,
-                           "summary": "跟客戶開會"
+                           "summary": "開會"
                        }
                     
-                    2. 輸入：「下週三早上九點去看牙醫」
+                    2. 輸入：「下週三早上九點去看牙醫預計一小時」
                        輸出：{
                            "date_type": "下週三",
                            "time_period": "上午",
                            "hour": "9",
                            "minute": "0",
+                           "duration_minutes": "60",
                            "is_recurring": false,
                            "recurrence_count": null,
                            "summary": "去看牙醫"
                        }
                     
-                    3. 輸入：「每週五下午三點做瑜珈」
+                    3. 輸入：「每週五下午三點做瑜珈預計一個半小時」
                        輸出：{
                            "date_type": "下週五",
                            "time_period": "下午",
                            "hour": "3",
                            "minute": "0",
+                           "duration_minutes": "90",
                            "is_recurring": true,
                            "recurrence_count": 1,
                            "summary": "做瑜珈"
-                       }
-                    
-                    4. 輸入：「三天後下午四點半打籃球」
-                       輸出：{
-                           "date_type": "3天後",
-                           "time_period": "下午",
-                           "hour": "4",
-                           "minute": "30",
-                           "is_recurring": false,
-                           "recurrence_count": null,
-                           "summary": "打籃球"
-                       }
-                    
-                    5. 輸入：「連續四個禮拜的週一早上九點開會」
-                       輸出：{
-                           "date_type": "連續4個週一",
-                           "time_period": "上午",
-                           "hour": "9",
-                           "minute": "0",
-                           "is_recurring": true,
-                           "recurrence_count": 4,
-                           "summary": "開會"
                        }
                     
                     只輸出 JSON 格式，不要有其他文字。如果無法解析，輸出空物件 {}.
@@ -670,8 +679,11 @@ def parse_event_text(text):
         
         logger.info(f"轉換後的時間：{hour}點{minute}分")
         
+        # 設定持續時間（預設為 60 分鐘）
+        duration_minutes = int(parsed_data.get('duration_minutes', 60))
+        
         start_time = datetime.combine(target_date, datetime_time(hour, minute))
-        end_time = start_time + timedelta(hours=1)
+        end_time = start_time + timedelta(minutes=duration_minutes)
         
         logger.info(f"開始時間：{start_time}")
         logger.info(f"結束時間：{end_time}")
@@ -748,63 +760,122 @@ def handle_message(event):
         user_id = event.source.user_id
         logger.info(f'收到文字訊息: {text}')
         
-        # 解析日期時間和摘要
-        logger.info(f'正在解析文字: {text}')
-        event_data = parse_event_text(text)
-        
-        if event_data:
+        # 檢查是否為查詢行程的指令
+        if text.lower() in ['查詢行程', '查看行程', '我的行程']:
             # 檢查用戶是否已授權
             service, error = get_google_calendar_service(user_id)
             if error and isinstance(error, str) and 'accounts.google.com' in error:
                 # 如果是授權 URL，提供更友善的提示
                 auth_message = (
-                    "您好！為了幫您安排行程，我需要先取得您的 Google Calendar 授權喔 😊\n\n"
+                    "您好！為了幫您查詢行程，我需要先取得您的 Google Calendar 授權喔 😊\n\n"
                     "請按照以下步驟進行授權：\n"
                     "1. 複製下方連結\n"
                     "2. 使用手機瀏覽器（Safari 或 Chrome）開啟\n"
                     "3. 登入您的 Google 帳號並同意授權\n\n"
                     f"{error}\n\n"
-                    "完成授權後，請再次傳送您要安排的行程給我 🙂"
+                    "完成授權後，請再次傳送「查詢行程」給我 🙂"
                 )
                 reply_text = auth_message
             elif error:
                 reply_text = f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏"
             else:
-                # 創建日曆事件
-                success, result = create_calendar_event(service, event_data)
-                if success:
-                    start_time = datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
-                    formatted_time = start_time.strftime('%Y年%m月%d日 %H:%M')
-                    
-                    # 檢查是否為循環事件
-                    if 'recurrence' in event_data:
-                        recurrence_count = event_data['recurrence'][0].split('COUNT=')[1]
-                        reply_text = (
-                            f"好的！我已經幫您安排好以下行程 ✨\n\n"
-                            f"📝 活動：{event_data['summary']}\n"
-                            f"🕒 時間：{formatted_time}\n"
-                            f"🔄 重複：每週重複，共 {recurrence_count} 次\n\n"
-                            "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
-                        )
-                    else:
-                        reply_text = (
-                            f"好的！我已經幫您安排好以下行程 ✨\n\n"
-                            f"📝 活動：{event_data['summary']}\n"
-                            f"🕒 時間：{formatted_time}\n\n"
-                            "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
-                        )
+                # 獲取未來 30 天的行程
+                now = datetime.now()
+                end_date = now + timedelta(days=30)
+                
+                events = service.events().list(
+                    calendarId='primary',
+                    timeMin=now.isoformat() + 'Z',
+                    timeMax=end_date.isoformat() + 'Z',
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                if not events.get('items'):
+                    reply_text = "您目前沒有未來的行程安排喔！"
                 else:
-                    reply_text = "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。"
+                    reply_text = "您未來的行程如下：\n\n"
+                    for event in events['items']:
+                        start = event['start'].get('dateTime', event['start'].get('date'))
+                        end = event['end'].get('dateTime', event['end'].get('date'))
+                        
+                        # 轉換時間格式
+                        start_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                        end_time = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                        
+                        # 格式化時間
+                        formatted_start = start_time.strftime('%Y年%m月%d日 %H:%M')
+                        formatted_end = end_time.strftime('%H:%M')
+                        
+                        reply_text += f"📅 {formatted_start} - {formatted_end}\n"
+                        reply_text += f"📝 {event['summary']}\n\n"
+                    
+                    reply_text += "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
         else:
-            reply_text = (
-                "抱歉，我無法理解您想安排的時間 😅\n\n"
-                "請用以下方式告訴我：\n"
-                "✨ 「明天下午三點開會」\n"
-                "✨ 「下週五早上九點看醫生」\n"
-                "✨ 「每週三下午四點打球」（重複行程）\n"
-                "✨ 「下下週一早上十點面試」\n"
-                "✨ 「三天後下午兩點半開會」"
-            )
+            # 解析日期時間和摘要
+            logger.info(f'正在解析文字: {text}')
+            event_data = parse_event_text(text)
+            
+            if event_data:
+                # 檢查用戶是否已授權
+                service, error = get_google_calendar_service(user_id)
+                if error and isinstance(error, str) and 'accounts.google.com' in error:
+                    # 如果是授權 URL，提供更友善的提示
+                    auth_message = (
+                        "您好！為了幫您安排行程，我需要先取得您的 Google Calendar 授權喔 😊\n\n"
+                        "請按照以下步驟進行授權：\n"
+                        "1. 複製下方連結\n"
+                        "2. 使用手機瀏覽器（Safari 或 Chrome）開啟\n"
+                        "3. 登入您的 Google 帳號並同意授權\n\n"
+                        f"{error}\n\n"
+                        "完成授權後，請再次傳送您要安排的行程給我 🙂"
+                    )
+                    reply_text = auth_message
+                elif error:
+                    reply_text = f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏"
+                else:
+                    # 創建日曆事件
+                    success, result = create_calendar_event(service, event_data)
+                    if success:
+                        start_time = datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
+                        end_time = datetime.fromisoformat(event_data['end']['dateTime'].replace('Z', '+00:00'))
+                        formatted_start = start_time.strftime('%Y年%m月%d日 %H:%M')
+                        formatted_end = end_time.strftime('%H:%M')
+                        
+                        # 儲存行程記錄
+                        save_event(user_id, result['id'], event_data['summary'], 
+                                 event_data['start']['dateTime'], event_data['end']['dateTime'])
+                        
+                        # 檢查是否為循環事件
+                        if 'recurrence' in event_data:
+                            recurrence_count = event_data['recurrence'][0].split('COUNT=')[1]
+                            reply_text = (
+                                f"好的！我已經幫您安排好以下行程 ✨\n\n"
+                                f"📝 活動：{event_data['summary']}\n"
+                                f"🕒 時間：{formatted_start} - {formatted_end}\n"
+                                f"🔄 重複：每週重複，共 {recurrence_count} 次\n\n"
+                                "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
+                            )
+                        else:
+                            reply_text = (
+                                f"好的！我已經幫您安排好以下行程 ✨\n\n"
+                                f"📝 活動：{event_data['summary']}\n"
+                                f"🕒 時間：{formatted_start} - {formatted_end}\n\n"
+                                "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
+                            )
+                    else:
+                        reply_text = "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。"
+            else:
+                reply_text = (
+                    "抱歉，我無法理解您想安排的時間 😅\n\n"
+                    "請用以下方式告訴我：\n"
+                    "✨ 「明天下午三點開會預計30分鐘」\n"
+                    "✨ 「下週五早上九點看醫生預計一小時」\n"
+                    "✨ 「每週三下午四點打球預計一個半小時」（重複行程）\n"
+                    "✨ 「下下週一早上十點面試預計兩小時」\n"
+                    "✨ 「三天後下午兩點半開會預計45分鐘」\n\n"
+                    "或是輸入「查詢行程」來查看您未來的行程安排。"
+                )
         
         # 回覆用戶
         if reply_text:
@@ -1077,7 +1148,7 @@ def handle_audio_message(event):
         # 下載音訊檔案
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-            response = line_bot_api.get_message_content_v2_message_content_get(
+            response = line_bot_api.get_message_content(
                 message_id=event.message.id
             )
             
@@ -1126,7 +1197,13 @@ def handle_audio_message(event):
                             success, result = create_calendar_event(service, event_data)
                             if success:
                                 start_time = datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
-                                formatted_time = start_time.strftime('%Y年%m月%d日 %H:%M')
+                                end_time = datetime.fromisoformat(event_data['end']['dateTime'].replace('Z', '+00:00'))
+                                formatted_start = start_time.strftime('%Y年%m月%d日 %H:%M')
+                                formatted_end = end_time.strftime('%H:%M')
+                                
+                                # 儲存行程記錄
+                                save_event(user_id, result['id'], event_data['summary'], 
+                                         event_data['start']['dateTime'], event_data['end']['dateTime'])
                                 
                                 # 檢查是否為循環事件
                                 if 'recurrence' in event_data:
@@ -1135,7 +1212,7 @@ def handle_audio_message(event):
                                         f"好的！我已經幫您安排好以下行程 ✨\n\n"
                                         f"🎙️ 語音辨識：「{text}」\n\n"
                                         f"📝 活動：{event_data['summary']}\n"
-                                        f"🕒 時間：{formatted_time}\n"
+                                        f"🕒 時間：{formatted_start} - {formatted_end}\n"
                                         f"🔄 重複：每週重複，共 {recurrence_count} 次\n\n"
                                         "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
                                     )
@@ -1144,7 +1221,7 @@ def handle_audio_message(event):
                                         f"好的！我已經幫您安排好以下行程 ✨\n\n"
                                         f"🎙️ 語音辨識：「{text}」\n\n"
                                         f"📝 活動：{event_data['summary']}\n"
-                                        f"🕒 時間：{formatted_time}\n\n"
+                                        f"🕒 時間：{formatted_start} - {formatted_end}\n\n"
                                         "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
                                     )
                             else:
@@ -1154,11 +1231,12 @@ def handle_audio_message(event):
                             f"我聽到您說：「{text}」\n\n"
                             "但是抱歉，我無法理解您想安排的時間 😅\n\n"
                             "請用以下方式告訴我：\n"
-                            "✨ 「明天下午三點開會」\n"
-                            "✨ 「下週五早上九點看醫生」\n"
-                            "✨ 「每週三下午四點打球」（重複行程）\n"
-                            "✨ 「下下週一早上十點面試」\n"
-                            "✨ 「三天後下午兩點半開會」"
+                            "✨ 「明天下午三點開會預計30分鐘」\n"
+                            "✨ 「下週五早上九點看醫生預計一小時」\n"
+                            "✨ 「每週三下午四點打球預計一個半小時」（重複行程）\n"
+                            "✨ 「下下週一早上十點面試預計兩小時」\n"
+                            "✨ 「三天後下午兩點半開會預計45分鐘」\n\n"
+                            "或是輸入「查詢行程」來查看您未來的行程安排。"
                         )
             except sr.UnknownValueError:
                 reply_text = "抱歉，我聽不太清楚您說的內容 😅\n請再說一次，或試試看直接輸入文字。"
@@ -1187,6 +1265,37 @@ def handle_audio_message(event):
             )
         except Exception as e:
             logger.error(f'發送錯誤訊息時也發生錯誤: {str(e)}')
+
+@with_db_connection
+def save_event(conn, line_user_id, event_id, summary, start_time, end_time):
+    """儲存行程記錄"""
+    c = conn.cursor()
+    c.execute('''
+    INSERT INTO events (line_user_id, event_id, summary, start_time, end_time)
+    VALUES (?, ?, ?, ?, ?)
+    ''', (line_user_id, event_id, summary, start_time, end_time))
+    conn.commit()
+    logger.info(f"Saved event for user: {line_user_id}")
+
+@with_db_connection
+def get_user_events(conn, line_user_id, start_date=None, end_date=None):
+    """獲取用戶的行程"""
+    c = conn.cursor()
+    query = '''
+    SELECT event_id, summary, start_time, end_time
+    FROM events
+    WHERE line_user_id = ?
+    '''
+    params = [line_user_id]
+    
+    if start_date and end_date:
+        query += ' AND start_time BETWEEN ? AND ?'
+        params.extend([start_date, end_date])
+    
+    query += ' ORDER BY start_time DESC'
+    
+    c.execute(query, params)
+    return c.fetchall()
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
