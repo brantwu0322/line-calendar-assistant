@@ -699,45 +699,68 @@ def callback():
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
     
-    # 驗證簽名
-    handler.handle(body, signature)
-    
-    # 解析事件
-    events = json.loads(body)['events']
-    for event in events:
-        if event['type'] == 'message' and event['message']['type'] == 'text':
-            handle_message(event)
-    
-    return 'OK'
+    try:
+        handler.handle(body, signature)
+        return 'OK'
+    except InvalidSignatureError:
+        logger.error('無效的簽名')
+        abort(400)
+    except Exception as e:
+        logger.error(f'處理回調時發生錯誤: {str(e)}')
+        abort(500)
 
-@with_error_handling
+@handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     """處理文字訊息"""
-    text = event.message.text
-    user_id = event.source.user_id
-    logger.info(f'收到文字訊息: {text}')
-    
-    # 解析日期時間和摘要
-    logger.info(f'正在解析文字: {text}')
-    parsed_datetime, summary, is_recurring = parse_datetime_and_summary(text)
-    
-    if parsed_datetime and summary:
-        # 檢查用戶是否已授權
-        if not is_user_authorized(user_id):
-            reply_text = f"您需要先授權 Google Calendar 才能使用此功能。\n請點擊以下連結進行授權：\n{get_authorization_url(user_id)}"
-        else:
-            # 創建日曆事件
-            event_id = create_calendar_event(user_id, parsed_datetime, summary, is_recurring)
-            if event_id:
-                reply_text = f"已成功創建日曆事件：\n{summary}\n時間：{parsed_datetime.strftime('%Y-%m-%d %H:%M')}"
+    try:
+        text = event.message.text
+        user_id = event.source.user_id
+        logger.info(f'收到文字訊息: {text}')
+        
+        # 解析日期時間和摘要
+        logger.info(f'正在解析文字: {text}')
+        parsed_datetime, summary, is_recurring = parse_datetime_and_summary(text)
+        
+        if parsed_datetime and summary:
+            # 檢查用戶是否已授權
+            service = get_google_calendar_service(user_id)
+            if not service:
+                reply_text = f"您需要先授權 Google Calendar 才能使用此功能。\n請點擊以下連結進行授權：\n{get_authorization_url(user_id)}"
             else:
-                reply_text = "創建日曆事件失敗，請稍後再試。"
-    else:
-        reply_text = "無法識別日期時間，請使用以下格式：\n'週五下午三點開會' 或 '明天上午十點會議'"
+                # 創建日曆事件
+                event_data = {
+                    'summary': summary,
+                    'start': {
+                        'dateTime': parsed_datetime.isoformat(),
+                        'timeZone': 'Asia/Taipei',
+                    },
+                    'end': {
+                        'dateTime': (parsed_datetime + timedelta(hours=1)).isoformat(),
+                        'timeZone': 'Asia/Taipei',
+                    },
+                }
+                if is_recurring:
+                    event_data['recurrence'] = ['RRULE:FREQ=WEEKLY']
+                
+                success, result = create_calendar_event(service, event_data)
+                if success:
+                    reply_text = f"已成功創建日曆事件：\n{summary}\n時間：{parsed_datetime.strftime('%Y-%m-%d %H:%M')}"
+                else:
+                    reply_text = "創建日曆事件失敗，請稍後再試。"
+        else:
+            reply_text = "無法識別日期時間，請使用以下格式：\n'週五下午三點開會' 或 '明天上午十點會議'"
+        
+        # 回覆用戶
+        if reply_text:
+            send_line_message(event.reply_token, reply_text)
     
-    # 回覆用戶
-    if reply_text:
-        send_line_message(event.reply_token, reply_text)
+    except Exception as e:
+        logger.error(f'處理訊息時發生錯誤: {str(e)}')
+        logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
+        try:
+            send_line_message(event.reply_token, "處理您的訊息時發生錯誤，請稍後再試。")
+        except Exception as e:
+            logger.error(f'發送錯誤訊息時也發生錯誤: {str(e)}')
 
 @app.route('/authorize/<line_user_id>')
 @with_error_handling
@@ -851,6 +874,49 @@ def admin_logout():
     session.pop('admin_username', None)
     flash('已成功登出')
     return redirect(url_for('admin_login'))
+
+@app.route('/admin/change_password', methods=['POST'])
+@with_error_handling
+def change_admin_password():
+    """修改管理員密碼"""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    
+    current_password = request.form.get('current_password')
+    new_password = request.form.get('new_password')
+    confirm_password = request.form.get('confirm_password')
+    
+    if not all([current_password, new_password, confirm_password]):
+        flash('請填寫所有密碼欄位')
+        return redirect(url_for('admin_dashboard'))
+    
+    if new_password != confirm_password:
+        flash('新密碼與確認密碼不符')
+        return redirect(url_for('admin_dashboard'))
+    
+    # 驗證當前密碼
+    username = session.get('admin_username')
+    if not verify_admin(username, current_password):
+        flash('當前密碼錯誤')
+        return redirect(url_for('admin_dashboard'))
+    
+    # 更新密碼
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        new_password_hash = generate_password_hash(new_password)
+        c.execute('UPDATE admins SET password = ? WHERE username = ?',
+                 (new_password_hash, username))
+        conn.commit()
+        flash('密碼已成功更新')
+    except Exception as e:
+        logger.error(f'更新密碼時發生錯誤: {str(e)}')
+        flash('更新密碼失敗')
+    finally:
+        if 'conn' in locals():
+            conn.close()
+    
+    return redirect(url_for('admin_dashboard'))
 
 @app.route('/subscribe/<line_user_id>')
 @with_error_handling
