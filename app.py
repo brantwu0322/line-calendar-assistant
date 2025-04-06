@@ -1181,6 +1181,18 @@ def subscribe(line_user_id):
         return "訂閱成功！請回到 LINE 繼續使用。"
     return "訂閱失敗，請稍後再試。"
 
+@app.route('/admin/delete_user/<line_user_id>', methods=['POST'])
+@with_error_handling
+def admin_delete_user(line_user_id):
+    """管理員刪除使用者"""
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': '請先登入'}), 401
+    
+    if delete_user(line_user_id):
+        return jsonify({'success': True, 'message': '使用者已成功刪除'})
+    else:
+        return jsonify({'success': False, 'message': '刪除使用者時發生錯誤'}), 500
+
 @app.errorhandler(404)
 @with_error_handling
 def page_not_found(e):
@@ -1319,6 +1331,25 @@ def get_user_events(conn, line_user_id, start_date=None, end_date=None):
     
     c.execute(query, params)
     return c.fetchall()
+
+@with_db_connection
+def delete_user(conn, line_user_id):
+    """刪除使用者及其相關資料"""
+    try:
+        c = conn.cursor()
+        # 刪除使用者的行程記錄
+        c.execute('DELETE FROM events WHERE line_user_id = ?', (line_user_id,))
+        # 刪除使用者的訂單記錄
+        c.execute('DELETE FROM orders WHERE line_user_id = ?', (line_user_id,))
+        # 刪除使用者資料
+        c.execute('DELETE FROM users WHERE line_user_id = ?', (line_user_id,))
+        conn.commit()
+        logger.info(f"成功刪除使用者：{line_user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"刪除使用者時發生錯誤: {str(e)}")
+        conn.rollback()
+        return False
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
