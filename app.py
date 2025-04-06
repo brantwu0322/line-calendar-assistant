@@ -85,7 +85,10 @@ configuration = Configuration(access_token=channel_access_token)
 handler = WebhookHandler(channel_secret)
 
 # Google Calendar API 設定
-SCOPES = ['https://www.googleapis.com/auth/calendar']
+SCOPES = [
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/userinfo.email'  # 新增獲取用戶 email 的權限
+]
 API_SERVICE_NAME = 'calendar'
 API_VERSION = 'v3'
 CLIENT_SECRETS_FILE = 'client_secrets.json'
@@ -504,7 +507,10 @@ def get_google_calendar_service(line_user_id=None):
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
 # Google Calendar API 設定
-SCOPES = ['https://www.googleapis.com/auth/calendar']
+SCOPES = [
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/userinfo.email'  # 新增獲取用戶 email 的權限
+]
 
 @with_error_handling
 def parse_event_text(text):
@@ -1053,10 +1059,31 @@ def oauth2callback():
             
             credentials = flow.credentials
             
-            # 儲存認證資訊
-            save_user_credentials(line_user_id, credentials)
+            # 獲取用戶 email
+            service = build('oauth2', 'v2', credentials=credentials)
+            user_info = service.userinfo().get().execute()
+            user_email = user_info.get('email')
+            logger.info(f"獲取到用戶 email: {user_email}")
             
-            logger.info(f"Successfully authorized user: {line_user_id}")
+            # 更新資料庫中的用戶資訊
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''
+                UPDATE users 
+                SET google_email = ?, google_credentials = ?
+                WHERE line_user_id = ?
+            ''', (user_email, json.dumps({
+                'token': credentials.token,
+                'refresh_token': credentials.refresh_token,
+                'token_uri': credentials.token_uri,
+                'client_id': credentials.client_id,
+                'client_secret': credentials.client_secret,
+                'scopes': credentials.scopes
+            }), line_user_id))
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"Successfully authorized user: {line_user_id} with email: {user_email}")
             return render_template('success.html', message="授權成功！請回到 LINE 繼續使用。")
         
         except Exception as e:
