@@ -733,8 +733,16 @@ def handle_message(event):
         if event_data:
             # 檢查用戶是否已授權
             service, error = get_google_calendar_service(user_id)
-            if error:
-                reply_text = f"您需要先授權 Google Calendar 才能使用此功能。\n請點擊以下連結進行授權：\n{error}"
+            if error and isinstance(error, str) and 'accounts.google.com' in error:
+                # 如果是授權 URL，提供更友善的提示
+                auth_message = (
+                    "請使用手機瀏覽器開啟以下連結進行 Google Calendar 授權：\n\n"
+                    f"{error}\n\n"
+                    "注意：請不要直接在 LINE 中開啟，需要複製連結到手機瀏覽器（Safari 或 Chrome）中開啟。"
+                )
+                reply_text = auth_message
+            elif error:
+                reply_text = f"發生錯誤：{error}"
             else:
                 # 創建日曆事件
                 success, result = create_calendar_event(service, event_data)
@@ -763,6 +771,13 @@ def handle_message(event):
 def authorize(line_user_id):
     """處理 Google Calendar 授權"""
     try:
+        # 檢查是否是行動瀏覽器
+        user_agent = request.headers.get('User-Agent', '').lower()
+        is_mobile_browser = 'mobile' in user_agent and ('safari' in user_agent or 'chrome' in user_agent)
+        
+        if not is_mobile_browser:
+            return render_template('browser_notice.html')
+
         # 從環境變數獲取憑證
         credentials_json = os.getenv('GOOGLE_CREDENTIALS')
         if not credentials_json:
