@@ -775,8 +775,8 @@ def create_calendar_event(service, event_data, line_user_id):
                  event_data['end']['dateTime'])
         
         # 回覆用戶
-        start_time = datetime.datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
-        end_time = datetime.datetime.fromisoformat(event_data['end']['dateTime'].replace('Z', '+00:00'))
+        start_time = datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
+        end_time = datetime.fromisoformat(event_data['end']['dateTime'].replace('Z', '+00:00'))
         formatted_start = start_time.strftime('%Y年%m月%d日 %H:%M')
         formatted_end = end_time.strftime('%H:%M')
         
