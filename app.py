@@ -1067,6 +1067,125 @@ def page_not_found(e):
 def internal_server_error(e):
     return render_template('error.html', error="伺服器內部錯誤"), 500
 
+@handler.add(MessageEvent, message=AudioMessageContent)
+def handle_audio_message(event):
+    """處理語音訊息"""
+    try:
+        user_id = event.source.user_id
+        logger.info(f'收到語音訊息，用戶 ID: {user_id}')
+        
+        # 下載音訊檔案
+        with ApiClient(configuration) as api_client:
+            messaging_api = MessagingApi(api_client)
+            response = messaging_api.get_message_content(message_id=event.message.id)
+            
+            # 將音訊檔案儲存為臨時檔案
+            with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio:
+                for chunk in response.iter_content():
+                    temp_audio.write(chunk)
+                temp_audio_path = temp_audio.name
+            
+            try:
+                # 將 m4a 轉換為 wav
+                audio = AudioSegment.from_file(temp_audio_path, format="m4a")
+                wav_path = temp_audio_path.replace('.m4a', '.wav')
+                audio.export(wav_path, format="wav")
+                
+                # 使用 speech_recognition 進行語音辨識
+                recognizer = sr.Recognizer()
+                with sr.AudioFile(wav_path) as source:
+                    audio_data = recognizer.record(source)
+                    # 使用 Google Speech Recognition 進行辨識
+                    text = recognizer.recognize_google(audio_data, language='zh-TW')
+                    logger.info(f'語音辨識結果: {text}')
+                    
+                    # 解析辨識出的文字
+                    event_data = parse_event_text(text)
+                    
+                    if event_data:
+                        # 檢查用戶是否已授權
+                        service, error = get_google_calendar_service(user_id)
+                        if error and isinstance(error, str) and 'accounts.google.com' in error:
+                            # 如果是授權 URL，提供更友善的提示
+                            auth_message = (
+                                "您好！為了幫您安排行程，我需要先取得您的 Google Calendar 授權喔 😊\n\n"
+                                "請按照以下步驟進行授權：\n"
+                                "1. 複製下方連結\n"
+                                "2. 使用手機瀏覽器（Safari 或 Chrome）開啟\n"
+                                "3. 登入您的 Google 帳號並同意授權\n\n"
+                                f"{error}\n\n"
+                                "完成授權後，請再次傳送您要安排的行程給我 🙂"
+                            )
+                            reply_text = auth_message
+                        elif error:
+                            reply_text = f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏"
+                        else:
+                            # 創建日曆事件
+                            success, result = create_calendar_event(service, event_data)
+                            if success:
+                                start_time = datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
+                                formatted_time = start_time.strftime('%Y年%m月%d日 %H:%M')
+                                
+                                # 檢查是否為循環事件
+                                if 'recurrence' in event_data:
+                                    recurrence_count = event_data['recurrence'][0].split('COUNT=')[1]
+                                    reply_text = (
+                                        f"好的！我已經幫您安排好以下行程 ✨\n\n"
+                                        f"🎙️ 語音辨識：「{text}」\n\n"
+                                        f"📝 活動：{event_data['summary']}\n"
+                                        f"🕒 時間：{formatted_time}\n"
+                                        f"🔄 重複：每週重複，共 {recurrence_count} 次\n\n"
+                                        "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
+                                    )
+                                else:
+                                    reply_text = (
+                                        f"好的！我已經幫您安排好以下行程 ✨\n\n"
+                                        f"🎙️ 語音辨識：「{text}」\n\n"
+                                        f"📝 活動：{event_data['summary']}\n"
+                                        f"🕒 時間：{formatted_time}\n\n"
+                                        "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
+                                    )
+                            else:
+                                reply_text = "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。"
+                    else:
+                        reply_text = (
+                            f"我聽到您說：「{text}」\n\n"
+                            "但是抱歉，我無法理解您想安排的時間 😅\n\n"
+                            "請用以下方式告訴我：\n"
+                            "✨ 「明天下午三點開會」\n"
+                            "✨ 「下週五早上九點看醫生」\n"
+                            "✨ 「每週三下午四點打球」（重複行程）\n"
+                            "✨ 「下下週一早上十點面試」\n"
+                            "✨ 「三天後下午兩點半開會」"
+                        )
+            except sr.UnknownValueError:
+                reply_text = "抱歉，我聽不太清楚您說的內容 😅\n請再說一次，或試試看直接輸入文字。"
+            except sr.RequestError as e:
+                logger.error(f"語音辨識服務錯誤: {str(e)}")
+                reply_text = "抱歉，語音辨識服務暫時無法使用 😅\n請稍後再試，或直接輸入文字。"
+            finally:
+                # 清理臨時檔案
+                try:
+                    os.unlink(temp_audio_path)
+                    os.unlink(wav_path)
+                except Exception as e:
+                    logger.error(f"清理臨時檔案時發生錯誤: {str(e)}")
+        
+        # 回覆用戶
+        if reply_text:
+            send_line_message(event.reply_token, reply_text)
+    
+    except Exception as e:
+        logger.error(f'處理語音訊息時發生錯誤: {str(e)}')
+        logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
+        try:
+            send_line_message(
+                event.reply_token, 
+                "非常抱歉，我在處理您的語音訊息時遇到了問題 😅\n請稍後再試一次，或直接輸入文字。"
+            )
+        except Exception as e:
+            logger.error(f'發送錯誤訊息時也發生錯誤: {str(e)}')
+
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
     logger.info(f"LINE_CHANNEL_ACCESS_TOKEN: {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')[:10]}...")
