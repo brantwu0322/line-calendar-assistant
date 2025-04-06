@@ -48,7 +48,7 @@ import pytz
 from dotenv import load_dotenv
 from flask_session import Session
 from flask_wtf.csrf import CSRFProtect
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -1040,17 +1040,48 @@ def oauth2callback(line_user_id):
         logger.exception("Detailed error information:")
         return render_template('error.html', error="授權過程發生錯誤，請稍後再試"), 500
 
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'admin' not in session:
-            return redirect(url_for('admin_login'))
-        return f(*args, **kwargs)
-    return decorated_function
+def verify_admin(username, password):
+    """驗證管理員帳號密碼"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('SELECT password FROM admins WHERE username = ?', (username,))
+        result = c.fetchone()
+        conn.close()
+        
+        if result:
+            return check_password_hash(result[0], password)
+        return False
+    except Exception as e:
+        app.logger.error(f"驗證管理員時發生錯誤: {str(e)}")
+        return False
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if not username or not password:
+            flash('請輸入帳號和密碼')
+            return render_template('admin_login.html')
+        
+        if verify_admin(username, password):
+            session['admin_logged_in'] = True
+            session['admin_username'] = username
+            app.logger.info(f'管理員 {username} 登入成功')
+            return redirect(url_for('admin_dashboard'))
+        else:
+            app.logger.warning(f'管理員登入失敗: {username}')
+            flash('帳號或密碼錯誤')
+    
+    return render_template('admin_login.html')
 
 @app.route('/admin/dashboard')
-@admin_required
 def admin_dashboard():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -1058,38 +1089,31 @@ def admin_dashboard():
         # 檢查資料庫連接
         c.execute('SELECT 1')
         if not c.fetchone():
-            raise Exception("Database connection test failed")
+            raise Exception("資料庫連接測試失敗")
             
         # 獲取使用者資料
-        c.execute('''SELECT u.line_user_id, u.subscription_status, u.subscription_end_date,
-                            u.created_at, COUNT(o.order_id) as order_count
-                     FROM users u
-                     LEFT JOIN orders o ON u.line_user_id = o.line_user_id
-                     GROUP BY u.line_user_id''')
+        c.execute('''SELECT line_user_id, created_at, updated_at 
+                     FROM users 
+                     ORDER BY created_at DESC''')
         users = c.fetchall()
         conn.close()
         
-        logger.info(f"Retrieved {len(users)} users from database")
-        return render_template('admin_dashboard.html', users=users)
+        app.logger.info(f'成功獲取 {len(users)} 位使用者資料')
+        return render_template('admin_dashboard.html', 
+                             users=users,
+                             admin_username=session.get('admin_username'))
     except Exception as e:
-        logger.error(f"Error in admin dashboard: {str(e)}")
-        logger.error(f"Error details: {traceback.format_exc()}")
+        app.logger.error(f'管理後臺發生錯誤: {str(e)}')
+        app.logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
         return render_template('error.html', error="資料庫存取錯誤"), 500
 
-@app.route('/admin/user/<line_user_id>/remove', methods=['POST'])
-@admin_required
-@csrf.exempt
-def remove_user(line_user_id):
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute('DELETE FROM users WHERE line_user_id = ?', (line_user_id,))
-        conn.commit()
-        conn.close()
-        return '成功移除使用者', 200
-    except Exception as e:
-        logger.error(f"Error removing user: {str(e)}")
-        return '移除使用者失敗', 500
+@app.route('/admin/logout')
+def admin_logout():
+    """管理員登出"""
+    session.pop('admin_logged_in', None)
+    session.pop('admin_username', None)
+    flash('已成功登出')
+    return redirect(url_for('admin_login'))
 
 # 訂閱相關路由
 @app.route('/subscribe/<line_user_id>')
@@ -1158,29 +1182,6 @@ def create_order(line_user_id, amount):
         logger.error(f"Error creating order: {str(e)}")
         return None
 
-def verify_admin(username, password):
-    """驗證管理員帳號密碼"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute('SELECT password FROM admins WHERE username = ?', (username,))
-        result = c.fetchone()
-        conn.close()
-        
-        if result:
-            # 這裡使用簡單的密碼驗證，實際應用中應該使用更安全的方式
-            return result[0] == password
-        return False
-    except Exception as e:
-        logger.error(f"Error verifying admin: {str(e)}")
-        return False
-
-@app.route('/admin/logout')
-def admin_logout():
-    """管理員登出"""
-    session.pop('admin', None)
-    return redirect(url_for('admin_login'))
-
 def init_admin():
     """初始化管理員帳號"""
     try:
@@ -1199,43 +1200,6 @@ def init_admin():
         conn.close()
     except Exception as e:
         logger.error(f"Error initializing admin account: {str(e)}")
-
-@app.route('/admin/login', methods=['GET', 'POST'])
-def admin_login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        if verify_admin(username, password):
-            session['admin_logged_in'] = True
-            return redirect(url_for('admin_dashboard'))
-        else:
-            flash('用戶名或密碼錯誤')
-    
-    return render_template('admin_login.html')
-
-@app.route('/admin/change_password', methods=['POST'])
-def change_admin_password():
-    if not session.get('admin_logged_in'):
-        return jsonify({'success': False, 'message': '請先登入'}), 401
-    
-    current_password = request.form.get('current_password')
-    new_password = request.form.get('new_password')
-    
-    if not verify_admin('admin', current_password):
-        return jsonify({'success': False, 'message': '當前密碼錯誤'}), 400
-    
-    try:
-        conn = sqlite3.connect('users.db')
-        c = conn.cursor()
-        c.execute('UPDATE admins SET password = ? WHERE username = ?',
-                 (generate_password_hash(new_password), 'admin'))
-        conn.commit()
-        conn.close()
-        return jsonify({'success': True, 'message': '密碼已成功更新'})
-    except Exception as e:
-        app.logger.error(f'更改密碼時發生錯誤: {str(e)}')
-        return jsonify({'success': False, 'message': '更新密碼時發生錯誤'}), 500
 
 @app.errorhandler(404)
 def page_not_found(e):
