@@ -338,11 +338,28 @@ def verify_admin(conn, username, password):
     return False
 
 @with_db_connection
-def get_all_users(conn):
-    """獲取所有已授權的使用者"""
+def get_all_users(conn, search_term=None):
+    """獲取所有已授權的使用者，支援搜尋"""
     c = conn.cursor()
-    c.execute('SELECT line_user_id FROM users')
-    return [user[0] for user in c.fetchall()]
+    if search_term:
+        # 搜尋 LINE ID 或 Google 帳號
+        c.execute('''
+            SELECT line_user_id, google_email, subscription_status, subscription_end_date 
+            FROM users 
+            WHERE line_user_id LIKE ? OR google_email LIKE ?
+        ''', (f'%{search_term}%', f'%{search_term}%'))
+    else:
+        c.execute('SELECT line_user_id, google_email, subscription_status, subscription_end_date FROM users')
+    
+    users = []
+    for row in c.fetchall():
+        users.append({
+            'line_user_id': row[0],
+            'google_email': row[1],
+            'subscription_status': row[2],
+            'subscription_end_date': row[3]
+        })
+    return users
 
 @with_db_connection
 def get_user_credentials(conn, line_user_id):
@@ -741,7 +758,7 @@ def parse_event_text(text):
         return None
 
 @with_error_handling
-def create_calendar_event(service, event_data):
+def create_calendar_event(service, event_data, line_user_id):
     """建立 Google Calendar 事件"""
     try:
         logger.info("開始建立 Google Calendar 事件")
@@ -820,15 +837,9 @@ def handle_message(event):
                 send_line_message(reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
             else:
                 try:
-                    # 建立 Google Calendar 服務
-                    service = get_google_calendar_service(user_id)
-                    if not service:
-                        send_line_message(reply_token, "無法建立 Google Calendar 服務，請重新授權。")
-                        return
-
                     # 設定時間範圍（現在到7天後）
-                    now = datetime.datetime.utcnow().isoformat() + 'Z'
-                    end_time = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).isoformat() + 'Z'
+                    now = datetime.utcnow().isoformat() + 'Z'
+                    end_time = (datetime.utcnow() + timedelta(days=7)).isoformat() + 'Z'
 
                     # 查詢行程
                     events_result = service.events().list(
@@ -851,8 +862,8 @@ def handle_message(event):
                         end = event['end'].get('dateTime', event['end'].get('date'))
                         
                         # 轉換時間格式
-                        start_time = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
-                        end_time = datetime.datetime.fromisoformat(end.replace('Z', '+00:00'))
+                        start_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                        end_time = datetime.fromisoformat(end.replace('Z', '+00:00'))
                         
                         # 格式化時間
                         if 'T' in start:  # 有具體時間的行程
@@ -901,35 +912,9 @@ def handle_message(event):
                     send_line_message(reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
                 else:
                     # 創建日曆事件
-                    success, result = create_calendar_event(service, event_data)
+                    success, result = create_calendar_event(service, event_data, user_id)
                     if success:
-                        start_time = datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
-                        end_time = datetime.fromisoformat(event_data['end']['dateTime'].replace('Z', '+00:00'))
-                        formatted_start = start_time.strftime('%Y年%m月%d日 %H:%M')
-                        formatted_end = end_time.strftime('%H:%M')
-                        
-                        # 儲存行程記錄
-                        save_event(user_id, result['id'], event_data['summary'], 
-                                 event_data['start']['dateTime'], event_data['end']['dateTime'])
-                        
-                        # 檢查是否為循環事件
-                        if 'recurrence' in event_data:
-                            recurrence_count = event_data['recurrence'][0].split('COUNT=')[1]
-                            reply_text = (
-                                f"好的！我已經幫您安排好以下行程 ✨\n\n"
-                                f"📝 活動：{event_data['summary']}\n"
-                                f"🕒 時間：{formatted_start} - {formatted_end}\n"
-                                f"🔄 重複：每週重複，共 {recurrence_count} 次\n\n"
-                                "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
-                            )
-                        else:
-                            reply_text = (
-                                f"好的！我已經幫您安排好以下行程 ✨\n\n"
-                                f"📝 活動：{event_data['summary']}\n"
-                                f"🕒 時間：{formatted_start} - {formatted_end}\n\n"
-                                "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
-                            )
-                        send_line_message(reply_token, reply_text)
+                        send_line_message(reply_token, result)
                     else:
                         send_line_message(reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
             else:
@@ -951,7 +936,7 @@ def handle_message(event):
         try:
             send_line_message(
                 reply_token, 
-                "非常抱歉，我在處理您的訊息時遇到了問題 😅\n請稍後再試一次，或聯繫系統管理員協助。"
+                "非常抱歉，我在處理您的訊息時遇到了問題 😅\n請稍後再試一次，或直接輸入文字。"
             )
         except Exception as e:
             logger.error(f'發送錯誤訊息時也發生錯誤: {str(e)}')
@@ -1117,12 +1102,16 @@ def admin_dashboard():
     if not session.get('admin_logged_in'):
         return redirect(url_for('admin_login'))
     
+    # 獲取搜尋關鍵字
+    search_term = request.args.get('search', '')
+    
     # 獲取使用者資料
-    users = get_all_users()
+    users = get_all_users(search_term=search_term)
     logger.info(f'成功獲取 {len(users)} 位使用者資料')
     return render_template('admin_dashboard.html', 
                          users=users,
-                         admin_username=session.get('admin_username'))
+                         admin_username=session.get('admin_username'),
+                         search_term=search_term)
 
 @app.route('/admin/logout')
 @with_error_handling
@@ -1241,38 +1230,28 @@ def handle_audio_message(event):
                     
                     if event_data:
                         # 檢查用戶是否已授權
-                        service = get_google_calendar_service(user_id)
-                        if not service:
-                            auth_url = get_google_auth_url(user_id)
-                            reply_text = (
+                        service, error = get_google_calendar_service(user_id)
+                        if error and isinstance(error, str) and 'accounts.google.com' in error:
+                            # 如果是授權 URL，提供更友善的提示
+                            auth_message = (
                                 "您好！為了幫您安排行程，我需要先取得您的 Google Calendar 授權喔 😊\n\n"
                                 "請按照以下步驟進行授權：\n"
                                 "1. 複製下方連結\n"
                                 "2. 使用手機瀏覽器（Safari 或 Chrome）開啟\n"
                                 "3. 登入您的 Google 帳號並同意授權\n\n"
-                                f"{auth_url}\n\n"
+                                f"{error}\n\n"
                                 "完成授權後，請再次傳送您要安排的行程給我 🙂"
                             )
+                            send_line_message(event.reply_token, auth_message)
+                        elif error:
+                            send_line_message(event.reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
                         else:
-                            # 建立事件
-                            result = service.events().insert(calendarId='primary', body=event_data).execute()
-                            logger.info(f"成功建立事件: {result.get('htmlLink')}")
-                            
-                            # 儲存事件到資料庫
-                            save_event(user_id, result['id'], event_data['summary'],
-                                     event_data['start']['dateTime'],
-                                     event_data['end']['dateTime'])
-                            
-                            # 回覆用戶
-                            start_time = datetime.datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
-                            end_time = datetime.datetime.fromisoformat(event_data['end']['dateTime'].replace('Z', '+00:00'))
-                            formatted_start = start_time.strftime('%Y年%m月%d日 %H:%M')
-                            formatted_end = end_time.strftime('%H:%M')
-                            
-                            reply_text = f"✅ 已成功建立行程：\n\n"
-                            reply_text += f"📅 時間：{formatted_start} - {formatted_end}\n"
-                            reply_text += f"📝 內容：{event_data['summary']}\n\n"
-                            reply_text += f"🔗 查看行程：{result.get('htmlLink')}"
+                            # 創建日曆事件
+                            success, result = create_calendar_event(service, event_data, user_id)
+                            if success:
+                                send_line_message(event.reply_token, result)
+                            else:
+                                send_line_message(event.reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
                     else:
                         reply_text = (
                             f"我聽到您說：「{text}」\n\n"
@@ -1285,11 +1264,12 @@ def handle_audio_message(event):
                             "✨ 「三天後下午兩點半開會預計45分鐘」\n\n"
                             "或是輸入「查詢行程」來查看您未來的行程安排。"
                         )
+                        send_line_message(event.reply_token, reply_text)
             except sr.UnknownValueError:
-                reply_text = "抱歉，我聽不太清楚您說的內容 😅\n請再說一次，或試試看直接輸入文字。"
+                send_line_message(event.reply_token, "抱歉，我聽不太清楚您說的內容 😅\n請再說一次，或試試看直接輸入文字。")
             except sr.RequestError as e:
                 logger.error(f"語音辨識服務錯誤: {str(e)}")
-                reply_text = "抱歉，語音辨識服務暫時無法使用 😅\n請稍後再試，或直接輸入文字。"
+                send_line_message(event.reply_token, "抱歉，語音辨識服務暫時無法使用 😅\n請稍後再試，或直接輸入文字。")
             finally:
                 # 清理臨時檔案
                 try:
@@ -1297,20 +1277,14 @@ def handle_audio_message(event):
                     os.unlink(wav_path)
                 except Exception as e:
                     logger.error(f"清理臨時檔案時發生錯誤: {str(e)}")
-        
-        # 回覆用戶
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=reply_text)
-        )
     
     except Exception as e:
         logger.error(f'處理語音訊息時發生錯誤: {str(e)}')
         logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
         try:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="非常抱歉，我在處理您的語音訊息時遇到了問題 😅\n請稍後再試一次，或直接輸入文字。")
+            send_line_message(
+                event.reply_token, 
+                "非常抱歉，我在處理您的語音訊息時遇到了問題 😅\n請稍後再試一次，或直接輸入文字。"
             )
         except Exception as e:
             logger.error(f'發送錯誤訊息時也發生錯誤: {str(e)}')

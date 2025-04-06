@@ -21,6 +21,25 @@
         .action-buttons {
             margin-top: 20px;
         }
+        .table th {
+            background-color: #f8f9fa;
+        }
+        .subscription-status {
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+        }
+        .status-free {
+            background-color: #e9ecef;
+            color: #495057;
+        }
+        .status-premium {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .search-form {
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
@@ -70,27 +89,52 @@
                 <h5 class="card-title mb-0">使用者列表</h5>
             </div>
             <div class="card-body">
+                <!-- 搜尋表單 -->
+                <form class="search-form" method="GET" action="{{ url_for('admin_dashboard') }}">
+                    <div class="input-group">
+                        <input type="text" class="form-control" name="search" placeholder="搜尋 LINE ID 或 Google 帳號..." value="{{ search_term }}">
+                        <button class="btn btn-outline-secondary" type="submit">搜尋</button>
+                        {% if search_term %}
+                            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">清除搜尋</a>
+                        {% endif %}
+                    </div>
+                </form>
+
                 <div class="table-responsive">
                     <table class="table table-striped">
                         <thead>
                             <tr>
-                                <th>LINE User ID</th>
-                                <th>建立時間</th>
+                                <th>LINE 用戶 ID</th>
+                                <th>Google 帳號</th>
+                                <th>訂閱狀態</th>
+                                <th>訂閱到期日</th>
                                 <th>操作</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for user in users %}
                             <tr>
-                                <td>{{ user }}</td>
-                                <td>-</td>
+                                <td>{{ user.line_user_id }}</td>
+                                <td>{{ user.google_email or '未授權' }}</td>
+                                <td>
+                                    <span class="subscription-status status-{{ user.subscription_status }}">
+                                        {{ '免費版' if user.subscription_status == 'free' else '進階版' }}
+                                    </span>
+                                </td>
+                                <td>{{ user.subscription_end_date or '無' }}</td>
                                 <td>
                                     <button class="btn btn-sm btn-danger">刪除</button>
                                 </td>
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="3" class="text-center">目前沒有使用者</td>
+                                <td colspan="5" class="text-center">
+                                    {% if search_term %}
+                                        找不到符合「{{ search_term }}」的使用者
+                                    {% else %}
+                                        目前沒有使用者
+                                    {% endif %}
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
