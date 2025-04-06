@@ -1289,6 +1289,25 @@ def handle_audio_message(event):
     try:
         logger.info(f"收到語音訊息，用戶 ID: {event.source.user_id}")
         
+        # 檢查用戶是否已授權
+        service, error = get_google_calendar_service(event.source.user_id)
+        if error and isinstance(error, str) and 'accounts.google.com' in error:
+            # 如果是授權 URL，提供更友善的提示
+            auth_message = (
+                "您好！為了幫您安排行程，我需要先取得您的 Google Calendar 授權喔 😊\n\n"
+                "請按照以下步驟進行授權：\n"
+                "1. 複製下方連結\n"
+                "2. 使用手機瀏覽器（Safari 或 Chrome）開啟\n"
+                "3. 登入您的 Google 帳號並同意授權\n\n"
+                f"{error}\n\n"
+                "完成授權後，請再次傳送語音訊息給我 🙂"
+            )
+            send_line_message(event.reply_token, auth_message)
+            return
+        elif error:
+            send_line_message(event.reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
+            return
+        
         # 使用正確的 API 獲取語音內容
         with ApiClient(configuration) as api_client:
             messaging_api = MessagingApi(api_client)
@@ -1348,8 +1367,14 @@ def handle_audio_message(event):
             parsed_data = json.loads(response.choices[0].message.content)
             logger.info(f"ChatGPT 解析結果: {parsed_data}")
             
+            # 解析日期時間
+            event_data = parse_event_text(text)
+            if not event_data:
+                send_line_message(event.reply_token, "抱歉，我無法理解您說的時間。請試著說得更清楚一些。")
+                return
+                
             # 建立行事曆事件
-            success, result = create_calendar_event(event.source.user_id, parsed_data)
+            success, result = create_calendar_event(service, event_data, event.source.user_id)
             
             if success:
                 send_line_message(event.reply_token, result)
