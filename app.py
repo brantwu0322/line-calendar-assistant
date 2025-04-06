@@ -592,7 +592,7 @@ def parse_datetime_and_summary(text):
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "你是一個專業的日期時間解析助手。請從文字中提取日期時間和事件摘要。"},
+                {"role": "system", "content": "你是一個專業的日期時間解析助手。請從文字中提取日期時間和事件摘要，並以 JSON 格式輸出。格式：{\"date\": \"YYYY-MM-DD HH:MM\", \"summary\": \"事件摘要\"}"},
                 {"role": "user", "content": f"請從以下文字中提取日期時間和事件摘要：{text}"}
             ]
         )
@@ -601,16 +601,16 @@ def parse_datetime_and_summary(text):
         result = response.choices[0].message.content
         app.logger.info(f"OpenAI 解析結果: {result}")
         
-        # 提取日期時間和摘要
-        datetime_pattern = r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2})'
-        match = re.search(datetime_pattern, result)
-        if match:
-            parsed_datetime = datetime.strptime(match.group(1), '%Y-%m-%d %H:%M')
-            summary = result.split('\n')[0].strip()
-            is_recurring = '重複' in result or '每週' in result or '每月' in result
-            return parsed_datetime, summary, is_recurring
-        else:
-            return None, None, False
+        try:
+            # 嘗試解析 JSON
+            data = json.loads(result)
+            if 'date' in data and 'summary' in data:
+                parsed_datetime = datetime.strptime(data['date'], '%Y-%m-%d %H:%M')
+                return parsed_datetime, data['summary'], False
+        except json.JSONDecodeError:
+            app.logger.error("無法解析 JSON 回應")
+        
+        return None, None, False
     except Exception as e:
         app.logger.error(f"解析日期時間時發生錯誤: {str(e)}")
         return None, None, False
@@ -644,8 +644,8 @@ def callback():
 def handle_message(event):
     """處理文字訊息"""
     try:
-        text = event['message']['text']
-        user_id = event['source']['userId']
+        text = event.message.text
+        user_id = event.source.user_id
         app.logger.info(f'收到文字訊息: {text}')
         
         # 解析日期時間和摘要
@@ -667,127 +667,9 @@ def handle_message(event):
             reply_text = "無法識別日期時間，請使用以下格式：\n'週五下午三點開會' 或 '明天上午十點會議'"
         
         # 回覆用戶
-        reply_message(event['replyToken'], reply_text)
-        
-    except Exception as e:
-        app.logger.error(f'處理訊息時發生錯誤: {str(e)}')
-        app.logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
-        try:
-            reply_message(event['replyToken'], "處理您的訊息時發生錯誤，請稍後再試。")
-        except Exception as e:
-            app.logger.error(f'發送錯誤訊息時也發生錯誤: {str(e)}')
-            app.logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
-
-def reply_message(reply_token, text):
-    """回覆 LINE 訊息"""
-    try:
-        if not text:
-            app.logger.error('嘗試發送空訊息')
-            return
-            
-        messaging_api = MessagingApi(Configuration(access_token=channel_access_token))
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[TextMessage(text=text)]
-            )
-        )
-    except Exception as e:
-        app.logger.error(f'發送訊息時發生錯誤: {str(e)}')
-        raise
-
-@handler.add(MessageEvent, message=TextMessageContent)
-def handle_message(event):
-    try:
-        user_id = event.source.user_id
-        text = event.message.text
-        app.logger.info(f"收到文字訊息: {text}")
-        app.logger.debug(f"事件詳情: {event}")
-
-        # 檢查是否為測試消息
-        if text == "測試":
-            reply_text = "收到測試訊息！LINE Bot 正常運作中。"
-            app.logger.info(f"準備回覆訊息: {reply_text}")
-            
-            with ApiClient(configuration) as api_client:
-                messaging_api = MessagingApi(api_client)
-                response = messaging_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[{
-                            "type": "text",
-                            "text": reply_text
-                        }]
-                    )
-                )
-            return
-
-        # 解析日期時間
-        app.logger.info(f"正在解析文字: {text}")
-        parsed_datetime, summary, is_recurring = parse_datetime_and_summary(text)
-        
-        if not parsed_datetime:
-            reply_text = "抱歉，我無法理解您指定的時間。請使用更明確的時間表達方式，例如：「明天下午3點開會」"
-            with ApiClient(configuration) as api_client:
-                messaging_api = MessagingApi(api_client)
-                response = messaging_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[{
-                            "type": "text",
-                            "text": reply_text
-                        }]
-                    )
-                )
-            return
-
-        app.logger.info(f"解析結果: 日期={parsed_datetime}, 摘要={summary}, 重複={is_recurring}")
-
-        # 檢查用戶是否已授權
-        if not is_user_authorized(user_id):
-            auth_url = get_authorization_url(user_id)
-            reply_text = f"請先授權我訪問您的 Google 日曆：\n{auth_url}"
-            
-            with ApiClient(configuration) as api_client:
-                messaging_api = MessagingApi(api_client)
-                response = messaging_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[{
-                            "type": "text",
-                            "text": reply_text
-                        }]
-                    )
-                )
-            return
-
-        # 創建日曆事件
-        calendar_service = get_google_calendar_service(user_id)
-        if not calendar_service:
-            reply_text = "無法連接到 Google 日曆服務，請重新授權：" + get_authorization_url(user_id)
-            
-            with ApiClient(configuration) as api_client:
-                messaging_api = MessagingApi(api_client)
-                response = messaging_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[{
-                            "type": "text",
-                            "text": reply_text
-                        }]
-                    )
-                )
-            return
-
-        event_link = create_calendar_event(calendar_service, parsed_datetime)
-        app.logger.info(f"成功建立事件: {event_link}")
-
-        reply_text = f"已成功建立行程：{summary}\n{event_link}"
-        app.logger.info(f"準備回覆訊息: {reply_text}")
-        
-        with ApiClient(configuration) as api_client:
-            messaging_api = MessagingApi(api_client)
-            response = messaging_api.reply_message(
+        if reply_text:
+            messaging_api = MessagingApi(Configuration(access_token=channel_access_token))
+            messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
                     messages=[{
@@ -796,29 +678,25 @@ def handle_message(event):
                     }]
                 )
             )
-
-    except Exception as e:
-        app.logger.error(f"處理訊息時發生錯誤: {str(e)}")
-        app.logger.error("詳細錯誤資訊：", exc_info=True)
         
-        error_message = "抱歉，處理您的請求時發生錯誤。請稍後再試。"
+    except Exception as e:
+        app.logger.error(f'處理訊息時發生錯誤: {str(e)}')
+        app.logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
         try:
-            with ApiClient(configuration) as api_client:
-                messaging_api = MessagingApi(api_client)
-                response = messaging_api.reply_message(
+            if hasattr(event, 'reply_token'):
+                messaging_api = MessagingApi(Configuration(access_token=channel_access_token))
+                messaging_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
                         messages=[{
                             "type": "text",
-                            "text": error_message
+                            "text": "處理您的訊息時發生錯誤，請稍後再試。"
                         }]
                     )
                 )
-        except Exception as reply_error:
-            app.logger.error(f"發送錯誤訊息時也發生錯誤: {str(reply_error)}")
-            app.logger.error("詳細錯誤資訊：", exc_info=True)
-
-    app.logger.info("成功處理 LINE 回調請求")
+        except Exception as e:
+            app.logger.error(f'發送錯誤訊息時也發生錯誤: {str(e)}')
+            app.logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
 
 @handler.add(MessageEvent, message=AudioMessageContent)
 @require_authorization
