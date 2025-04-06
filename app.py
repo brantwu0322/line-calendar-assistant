@@ -332,8 +332,13 @@ def get_user_credentials(conn, line_user_id):
     c.execute('SELECT google_credentials FROM users WHERE line_user_id = ?', (line_user_id,))
     result = c.fetchone()
     
-    if result:
-        return Credentials.from_authorized_user_info(json.loads(result[0]))
+    if result and result[0]:
+        try:
+            creds_dict = json.loads(result[0])
+            return creds_dict
+        except json.JSONDecodeError:
+            logger.error(f"無法解析用戶 {line_user_id} 的憑證 JSON")
+            return None
     return None
 
 @with_db_connection
@@ -357,8 +362,8 @@ def get_google_calendar_service(line_user_id=None):
     try:
         if line_user_id:
             # 如果提供了 line_user_id，嘗試獲取用戶的憑證
-            creds = get_user_credentials(line_user_id)
-            if not creds:
+            creds_dict = get_user_credentials(line_user_id)
+            if not creds_dict:
                 # 如果沒有憑證，返回授權 URL
                 credentials_json = os.getenv('GOOGLE_CREDENTIALS')
                 if not credentials_json:
@@ -404,10 +409,22 @@ def get_google_calendar_service(line_user_id=None):
                     return None, f"無法初始化 Google Calendar 授權流程：{str(e)}"
             
             try:
-                credentials = Credentials.from_authorized_user_info(creds)
+                # 使用憑證字典創建 Credentials 對象
+                credentials = Credentials(
+                    token=creds_dict['token'],
+                    refresh_token=creds_dict['refresh_token'],
+                    token_uri=creds_dict['token_uri'],
+                    client_id=creds_dict['client_id'],
+                    client_secret=creds_dict['client_secret'],
+                    scopes=creds_dict['scopes']
+                )
+                
+                # 如果憑證過期，嘗試刷新
                 if credentials and credentials.expired and credentials.refresh_token:
                     credentials.refresh(Request())
+                    # 更新資料庫中的憑證
                     save_user_credentials(line_user_id, credentials)
+                
                 service = build('calendar', 'v3', credentials=credentials)
                 return service, None
             except Exception as e:
