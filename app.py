@@ -1076,8 +1076,10 @@ def handle_audio_message(event):
         
         # 下載音訊檔案
         with ApiClient(configuration) as api_client:
-            messaging_api = MessagingApi(api_client)
-            response = messaging_api.get_message_content(message_id=event.message.id)
+            line_bot_api = MessagingApi(api_client)
+            response = line_bot_api.get_message_content_v2_message_content_get(
+                message_id=event.message.id
+            )
             
             # 將音訊檔案儲存為臨時檔案
             with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio:
