@@ -787,38 +787,42 @@ def handle_message(event):
             elif error:
                 reply_text = f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏"
             else:
-                # 獲取未來 30 天的行程
-                now = datetime.now()
-                end_date = now + timedelta(days=30)
-                
-                events = service.events().list(
-                    calendarId='primary',
-                    timeMin=now.isoformat() + 'Z',
-                    timeMax=end_date.isoformat() + 'Z',
-                    singleEvents=True,
-                    orderBy='startTime'
-                ).execute()
-                
-                if not events.get('items'):
-                    reply_text = "您目前沒有未來的行程安排喔！"
-                else:
-                    reply_text = "您未來的行程如下：\n\n"
-                    for event in events['items']:
-                        start = event['start'].get('dateTime', event['start'].get('date'))
-                        end = event['end'].get('dateTime', event['end'].get('date'))
-                        
-                        # 轉換時間格式
-                        start_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                        end_time = datetime.fromisoformat(end.replace('Z', '+00:00'))
-                        
-                        # 格式化時間
-                        formatted_start = start_time.strftime('%Y年%m月%d日 %H:%M')
-                        formatted_end = end_time.strftime('%H:%M')
-                        
-                        reply_text += f"📅 {formatted_start} - {formatted_end}\n"
-                        reply_text += f"📝 {event['summary']}\n\n"
+                try:
+                    # 獲取未來 30 天的行程
+                    now = datetime.now()
+                    end_date = now + timedelta(days=30)
                     
-                    reply_text += "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
+                    events = service.events().list(
+                        calendarId='primary',
+                        timeMin=now.isoformat() + 'Z',
+                        timeMax=end_date.isoformat() + 'Z',
+                        singleEvents=True,
+                        orderBy='startTime'
+                    ).execute()
+                    
+                    if not events.get('items'):
+                        reply_text = "您目前沒有未來的行程安排喔！"
+                    else:
+                        reply_text = "您未來的行程如下：\n\n"
+                        for event in events['items']:
+                            start = event['start'].get('dateTime', event['start'].get('date'))
+                            end = event['end'].get('dateTime', event['end'].get('date'))
+                            
+                            # 轉換時間格式
+                            start_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                            end_time = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                            
+                            # 格式化時間
+                            formatted_start = start_time.strftime('%Y年%m月%d日 %H:%M')
+                            formatted_end = end_time.strftime('%H:%M')
+                            
+                            reply_text += f"📅 {formatted_start} - {formatted_end}\n"
+                            reply_text += f"📝 {event['summary']}\n\n"
+                        
+                        reply_text += "需要修改或查看完整行程，可以直接打開您的 Google 日曆喔！"
+                except Exception as e:
+                    logger.error(f"查詢行程時發生錯誤: {str(e)}")
+                    reply_text = "抱歉，我在查詢行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。"
         else:
             # 解析日期時間和摘要
             logger.info(f'正在解析文字: {text}')
