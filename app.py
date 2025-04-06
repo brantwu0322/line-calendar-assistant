@@ -1290,9 +1290,11 @@ def handle_audio_message(event):
         logger.info(f"收到語音訊息，用戶 ID: {event.source.user_id}")
         
         # 使用正確的 API 獲取語音內容
-        message_content = line_bot_api.get_message_content_by_id(
-            message_id=event.message.id
-        )
+        with ApiClient(configuration) as api_client:
+            messaging_api = MessagingApi(api_client)
+            message_content = messaging_api.get_message_content(
+                message_id=event.message.id
+            )
         
         # 將語音內容保存為臨時文件
         with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio_file:
