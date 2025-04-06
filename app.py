@@ -921,11 +921,29 @@ def handle_message(event):
                 elif error:
                     send_line_message(reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
                 else:
-                    # 創建日曆事件
-                    success, result = create_calendar_event(service, event_data, user_id)
-                    if success:
-                        send_line_message(reply_token, result)
-                    else:
+                    try:
+                        # 創建日曆事件
+                        result = service.events().insert(calendarId='primary', body=event_data).execute()
+                        
+                        # 儲存事件到資料庫
+                        save_event(user_id, result['id'], event_data['summary'],
+                                event_data['start']['dateTime'],
+                                event_data['end']['dateTime'])
+                        
+                        # 回覆用戶
+                        start_time = datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
+                        end_time = datetime.fromisoformat(event_data['end']['dateTime'].replace('Z', '+00:00'))
+                        formatted_start = start_time.strftime('%Y年%m月%d日 %H:%M')
+                        formatted_end = end_time.strftime('%H:%M')
+                        
+                        reply_text = f"✅ 已成功建立行程：\n\n"
+                        reply_text += f"📅 時間：{formatted_start} - {formatted_end}\n"
+                        reply_text += f"📝 內容：{event_data['summary']}\n\n"
+                        reply_text += f"🔗 查看行程：{result.get('htmlLink')}"
+                        
+                        send_line_message(reply_token, reply_text)
+                    except Exception as e:
+                        logger.error(f"建立行程時發生錯誤: {str(e)}")
                         send_line_message(reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
             else:
                 reply_text = (
