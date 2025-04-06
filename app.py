@@ -370,9 +370,11 @@ def get_google_calendar_service(line_user_id=None):
                         json.dump(credentials_info, temp_file)
                         temp_file_path = temp_file.name
                     
-                    # 使用查詢參數而不是路徑參數
-                    redirect_uri = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com')
-                    redirect_uri = f"{redirect_uri.rstrip('/')}/oauth2callback"
+                    # 確保使用完整的 URL
+                    app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
+                    redirect_uri = f"{app_url}/oauth2callback"
+                    
+                    logger.info(f"使用重定向 URI: {redirect_uri}")
                     
                     flow = Flow.from_client_secrets_file(
                         temp_file_path,
@@ -381,13 +383,17 @@ def get_google_calendar_service(line_user_id=None):
                     )
                     os.unlink(temp_file_path)
                     
-                    # 在授權 URL 中加入 line_user_id 參數
+                    # 生成授權 URL
                     authorization_url, _ = flow.authorization_url(
                         access_type='offline',
                         include_granted_scopes='true',
-                        state=line_user_id  # 使用 state 參數傳遞 line_user_id
+                        state=line_user_id,
+                        prompt='consent'  # 強制顯示同意畫面
                     )
+                    
+                    logger.info(f"生成授權 URL: {authorization_url}")
                     return None, authorization_url
+                    
                 except json.JSONDecodeError:
                     return None, "GOOGLE_CREDENTIALS 環境變數格式錯誤"
                 except Exception as e:
@@ -769,24 +775,27 @@ def authorize(line_user_id):
             temp_file_path = temp_file.name
 
         try:
-            # 使用完整的 URL
-            redirect_uri = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com')
-            redirect_uri = f"{redirect_uri.rstrip('/')}/oauth2callback"
-
+            # 確保使用完整的 URL
+            app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
+            redirect_uri = f"{app_url}/oauth2callback"
+            
+            logger.info(f"授權使用重定向 URI: {redirect_uri}")
+            
             flow = Flow.from_client_secrets_file(
                 temp_file_path,
                 SCOPES,
                 redirect_uri=redirect_uri
             )
             
-            # 在授權 URL 中加入 line_user_id 參數
+            # 生成授權 URL
             authorization_url, _ = flow.authorization_url(
                 access_type='offline',
                 include_granted_scopes='true',
-                state=line_user_id  # 使用 state 參數傳遞 line_user_id
+                state=line_user_id,
+                prompt='consent'  # 強制顯示同意畫面
             )
             
-            logger.info(f"生成授權 URL 成功：{authorization_url}")
+            logger.info(f"生成授權 URL: {authorization_url}")
             return redirect(authorization_url)
         
         except Exception as e:
@@ -826,10 +835,12 @@ def oauth2callback():
             temp_file_path = temp_file.name
 
         try:
-            # 使用查詢參數而不是路徑參數
-            redirect_uri = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com')
-            redirect_uri = f"{redirect_uri.rstrip('/')}/oauth2callback"
-
+            # 確保使用完整的 URL
+            app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
+            redirect_uri = f"{app_url}/oauth2callback"
+            
+            logger.info(f"回調使用重定向 URI: {redirect_uri}")
+            
             flow = Flow.from_client_secrets_file(
                 temp_file_path,
                 SCOPES,
@@ -849,6 +860,7 @@ def oauth2callback():
         
         except Exception as e:
             logger.error(f"OAuth callback error: {str(e)}")
+            logger.error(f"Request URL: {request.url}")
             return render_template('error.html', error=f"授權過程發生錯誤：{str(e)}"), 500
         
         finally:
