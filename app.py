@@ -54,8 +54,11 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # 設定資料庫路徑
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'users.db')
+DB_PATH = os.path.join(os.getenv('RENDER_DB_PATH', os.path.dirname(os.path.abspath(__file__))), 'users.db')
 logger.info(f"Database path: {DB_PATH}")
+
+# 確保資料庫目錄存在
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
@@ -371,11 +374,28 @@ def save_user_credentials(conn, line_user_id, credentials):
         'scopes': credentials.scopes
     }
     
-    # 儲存到資料庫
-    c.execute('INSERT OR REPLACE INTO users (line_user_id, google_credentials) VALUES (?, ?)',
-              (line_user_id, json.dumps(creds_dict)))
-    conn.commit()
-    logger.info(f"已儲存用戶 {line_user_id} 的憑證")
+    try:
+        # 檢查用戶是否已存在
+        c.execute('SELECT line_user_id FROM users WHERE line_user_id = ?', (line_user_id,))
+        user_exists = c.fetchone() is not None
+        
+        if user_exists:
+            # 如果用戶已存在，只更新 google_credentials
+            c.execute('UPDATE users SET google_credentials = ? WHERE line_user_id = ?',
+                     (json.dumps(creds_dict), line_user_id))
+        else:
+            # 如果用戶不存在，創建新用戶
+            c.execute('''
+            INSERT INTO users (line_user_id, google_credentials, subscription_status, subscription_end_date)
+            VALUES (?, ?, 'free', NULL)
+            ''', (line_user_id, json.dumps(creds_dict)))
+        
+        conn.commit()
+        logger.info(f"已儲存用戶 {line_user_id} 的憑證")
+    except Exception as e:
+        logger.error(f"儲存用戶憑證時發生錯誤: {str(e)}")
+        conn.rollback()
+        raise
 
 def get_google_calendar_service(line_user_id=None):
     """取得使用者的 Google Calendar 服務"""
@@ -441,9 +461,15 @@ def get_google_calendar_service(line_user_id=None):
                 
                 # 如果憑證過期，嘗試刷新
                 if credentials and credentials.expired and credentials.refresh_token:
-                    credentials.refresh(Request())
-                    # 更新資料庫中的憑證
-                    save_user_credentials(line_user_id, credentials)
+                    try:
+                        credentials.refresh(Request())
+                        # 更新資料庫中的憑證
+                        save_user_credentials(line_user_id, credentials)
+                        logger.info(f"已刷新用戶 {line_user_id} 的憑證")
+                    except Exception as e:
+                        logger.error(f"刷新憑證時發生錯誤：{str(e)}")
+                        # 如果刷新失敗，返回授權 URL
+                        return None, "憑證已過期，需要重新授權"
                 
                 service = build('calendar', 'v3', credentials=credentials)
                 return service, None
