@@ -125,16 +125,14 @@ def send_line_message(reply_token, text):
             logger.error('嘗試發送空訊息')
             return
             
-        messaging_api = MessagingApi(Configuration(access_token=channel_access_token))
-        messaging_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[{
-                    "type": "text",
-                    "text": text
-                }]
+        with ApiClient(configuration) as api_client:
+            messaging_api = MessagingApi(api_client)
+            messaging_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[TextMessage(text=text)]
+                )
             )
-        )
     except Exception as e:
         logger.error(f'發送訊息時發生錯誤: {str(e)}')
         raise
@@ -146,8 +144,20 @@ def parse_datetime_and_summary(text):
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "你是一個專業的日期時間解析助手。請從文字中提取日期時間和事件摘要，並以 JSON 格式輸出。格式：{\"date\": \"YYYY-MM-DD HH:MM\", \"summary\": \"事件摘要\"}"},
-                {"role": "user", "content": f"請從以下文字中提取日期時間和事件摘要：{text}"}
+                {
+                    "role": "system",
+                    "content": """你是一個專業的日期時間解析助手。請從文字中提取日期時間和事件摘要。
+                    規則：
+                    1. 如果提到"週X"或"星期X"，請計算最近的那個日期
+                    2. 如果沒有明確說明是上午還是下午，3-11點預設為上午，12-2點預設為下午
+                    3. 輸出格式必須是 JSON：{"date": "2024-04-06", "time": "15:00", "summary": "事件摘要"}
+                    
+                    範例：
+                    輸入："週五下午三點開會"
+                    輸出：{"date": "2024-04-12", "time": "15:00", "summary": "開會"}
+                    """
+                },
+                {"role": "user", "content": text}
             ]
         )
         
@@ -156,13 +166,17 @@ def parse_datetime_and_summary(text):
         logger.info(f"OpenAI 解析結果: {result}")
         
         try:
-            # 嘗試解析 JSON
+            # 解析 JSON
             data = json.loads(result)
-            if 'date' in data and 'summary' in data:
-                parsed_datetime = datetime.strptime(data['date'], '%Y-%m-%d %H:%M')
+            if 'date' in data and 'time' in data and 'summary' in data:
+                # 組合日期和時間
+                datetime_str = f"{data['date']} {data['time']}"
+                parsed_datetime = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
                 return parsed_datetime, data['summary'], False
         except json.JSONDecodeError:
             logger.error("無法解析 JSON 回應")
+        except ValueError as e:
+            logger.error(f"日期時間格式錯誤: {str(e)}")
         
         return None, None, False
     except Exception as e:
@@ -719,32 +733,19 @@ def handle_message(event):
         
         # 解析日期時間和摘要
         logger.info(f'正在解析文字: {text}')
-        parsed_datetime, summary, is_recurring = parse_datetime_and_summary(text)
+        event_data = parse_event_text(text)
         
-        if parsed_datetime and summary:
+        if event_data:
             # 檢查用戶是否已授權
-            service = get_google_calendar_service(user_id)
-            if not service:
-                reply_text = f"您需要先授權 Google Calendar 才能使用此功能。\n請點擊以下連結進行授權：\n{get_authorization_url(user_id)}"
+            service, error = get_google_calendar_service(user_id)
+            if error:
+                reply_text = f"您需要先授權 Google Calendar 才能使用此功能。\n請點擊以下連結進行授權：\n{error}"
             else:
                 # 創建日曆事件
-                event_data = {
-                    'summary': summary,
-                    'start': {
-                        'dateTime': parsed_datetime.isoformat(),
-                        'timeZone': 'Asia/Taipei',
-                    },
-                    'end': {
-                        'dateTime': (parsed_datetime + timedelta(hours=1)).isoformat(),
-                        'timeZone': 'Asia/Taipei',
-                    },
-                }
-                if is_recurring:
-                    event_data['recurrence'] = ['RRULE:FREQ=WEEKLY']
-                
                 success, result = create_calendar_event(service, event_data)
                 if success:
-                    reply_text = f"已成功創建日曆事件：\n{summary}\n時間：{parsed_datetime.strftime('%Y-%m-%d %H:%M')}"
+                    start_time = datetime.fromisoformat(event_data['start']['dateTime'].replace('Z', '+00:00'))
+                    reply_text = f"已成功創建日曆事件：\n{event_data['summary']}\n時間：{start_time.strftime('%Y-%m-%d %H:%M')}"
                 else:
                     reply_text = "創建日曆事件失敗，請稍後再試。"
         else:
