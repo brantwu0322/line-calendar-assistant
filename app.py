@@ -1234,171 +1234,99 @@ def internal_server_error(e):
 def handle_audio_message(event):
     """處理語音訊息"""
     try:
-        user_id = event.source.user_id
-        logger.info(f'收到語音訊息，用戶 ID: {user_id}')
+        logger.info(f"收到語音訊息，用戶 ID: {event.source.user_id}")
         
-        # 下載音訊檔案
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            response = line_bot_api.get_message_content(
-                message_id=event.message.id
-            )
-            
-            # 將音訊檔案儲存為臨時檔案
-            with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio:
-                for chunk in response.iter_content():
-                    temp_audio.write(chunk)
-                temp_audio_path = temp_audio.name
-            
-            try:
-                # 將 m4a 轉換為 wav
-                audio = AudioSegment.from_file(temp_audio_path, format="m4a")
-                wav_path = temp_audio_path.replace('.m4a', '.wav')
-                audio.export(wav_path, format="wav")
-                
-                # 使用 speech_recognition 進行語音辨識
-                recognizer = sr.Recognizer()
-                with sr.AudioFile(wav_path) as source:
-                    audio_data = recognizer.record(source)
-                    # 使用 Google Speech Recognition 進行辨識
-                    text = recognizer.recognize_google(audio_data, language='zh-TW')
-                    logger.info(f'語音辨識結果: {text}')
-                    
-                    # 使用 ChatGPT 進行進一步解析
-                    response = openai.ChatCompletion.create(
-                        model="gpt-4",
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": """你是一個行程解析助手。請將用戶的語音轉文字結果轉換成結構化的時間資訊。
-                                輸出格式要求：
-                                {
-                                    "date_type": "今天|明天|後天|大後天|下週一|下週二|下週三|下週四|下週五|下週六|下週日|下下週一|下下週二|下下週三|下下週四|下下週五|下下週六|下下週日|連續X個週Y",
-                                    "time_period": "上午|下午",
-                                    "hour": "小時數字",
-                                    "minute": "分鐘數字",
-                                    "duration_minutes": "行程持續時間（分鐘）",
-                                    "is_recurring": false,
-                                    "recurrence_count": null,
-                                    "summary": "事件描述"
-                                }
-                                
-                                規則：
-                                1. 時間解析：
-                                   - "早上"、"上午"、"早上"、"早上" 都視為 "上午"
-                                   - "下午"、"下午"、"晚上"、"晚上" 都視為 "下午"
-                                   - 如果沒有指定上午/下午，根據小時判斷（12點前為上午，12點後為下午）
-                                   - 數字可以用中文或阿拉伯數字表示，都要轉換成阿拉伯數字
-                                   - "點"、"時" 都表示小時
-                                   - "分" 表示分鐘
-                                   - "半" 表示 30 分
-                                   - 如果沒有指定持續時間，預設為 60 分鐘
-                                   - 持續時間可以用"分鐘"、"小時"、"半小時"等表示
-                                
-                                2. 日期解析：
-                                   - "今天" 指今天
-                                   - "明天" 指明天
-                                   - "後天" 指後天
-                                   - "大後天" 指大後天
-                                   - "下週X" 指下週的某一天
-                                   - "下下週X" 指下下週的某一天
-                                   - "連續X個週Y" 指連續X週的週Y
-                                   - "X天後" 指X天後
-                                
-                                3. 循環事件：
-                                   - 只有明確包含「每週」、「每個禮拜」或「連續X個週Y」等循環描述時才設為 true
-                                   - recurrence_count 只有在 is_recurring 為 true 時才設定數值
-                                
-                                4. 事件描述：
-                                   - 保留原始描述中的關鍵資訊
-                                   - 移除時間相關的描述詞
-                                
-                                只輸出 JSON 格式，不要有其他文字。如果無法解析，輸出空物件 {}.
-                                """
-                            },
-                            {
-                                "role": "user",
-                                "content": text
-                            }
-                        ],
-                        temperature=0
-                    )
-                    
-                    logger.info("收到 GPT-4 回應")
-                    logger.info(f"GPT-4 原始回應：{response.choices[0].message.content}")
-                    
-                    try:
-                        parsed_data = json.loads(response.choices[0].message.content)
-                        logger.info(f"GPT 解析結果：{json.dumps(parsed_data, ensure_ascii=False)}")
-                        
-                        if parsed_data:
-                            # 建立 Google Calendar 事件資料
-                            event_data = parse_event_text(text)
-                            
-                            if event_data:
-                                # 檢查用戶是否已授權
-                                service, error = get_google_calendar_service(user_id)
-                                if error and isinstance(error, str) and 'accounts.google.com' in error:
-                                    # 如果是授權 URL，提供更友善的提示
-                                    auth_message = (
-                                        "您好！為了幫您安排行程，我需要先取得您的 Google Calendar 授權喔 😊\n\n"
-                                        "請按照以下步驟進行授權：\n"
-                                        "1. 複製下方連結\n"
-                                        "2. 使用手機瀏覽器（Safari 或 Chrome）開啟\n"
-                                        "3. 登入您的 Google 帳號並同意授權\n\n"
-                                        f"{error}\n\n"
-                                        "完成授權後，請再次傳送您要安排的行程給我 🙂"
-                                    )
-                                    send_line_message(event.reply_token, auth_message)
-                                elif error:
-                                    send_line_message(event.reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
-                                else:
-                                    # 創建日曆事件
-                                    success, result = create_calendar_event(service, event_data, user_id)
-                                    if success:
-                                        send_line_message(event.reply_token, result)
-                                    else:
-                                        send_line_message(event.reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
-                            else:
-                                reply_text = (
-                                    f"我聽到您說：「{text}」\n\n"
-                                    "但是抱歉，我無法理解您想安排的時間 😅\n\n"
-                                    "請用以下方式告訴我：\n"
-                                    "✨ 「明天下午三點開會預計30分鐘」\n"
-                                    "✨ 「下週五早上九點看醫生預計一小時」\n"
-                                    "✨ 「每週三下午四點打球預計一個半小時」（重複行程）\n"
-                                    "✨ 「下下週一早上十點面試預計兩小時」\n"
-                                    "✨ 「三天後下午兩點半開會預計45分鐘」\n\n"
-                                    "或是輸入「查詢行程」來查看您未來的行程安排。"
-                                )
-                                send_line_message(event.reply_token, reply_text)
-                    except json.JSONDecodeError:
-                        logger.error("無法解析 GPT-4 的 JSON 回應")
-                        send_line_message(event.reply_token, "抱歉，我在處理您的語音訊息時遇到了問題 😅\n請稍後再試一次，或直接輸入文字。")
-                
-            except sr.UnknownValueError:
-                send_line_message(event.reply_token, "抱歉，我聽不太清楚您說的內容 😅\n請再說一次，或試試看直接輸入文字。")
-            except sr.RequestError as e:
-                logger.error(f"語音辨識服務錯誤: {str(e)}")
-                send_line_message(event.reply_token, "抱歉，語音辨識服務暫時無法使用 😅\n請稍後再試，或直接輸入文字。")
-            finally:
-                # 清理臨時檔案
-                try:
-                    os.unlink(temp_audio_path)
-                    os.unlink(wav_path)
-                except Exception as e:
-                    logger.error(f"清理臨時檔案時發生錯誤: {str(e)}")
-    
-    except Exception as e:
-        logger.error(f'處理語音訊息時發生錯誤: {str(e)}')
-        logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
+        # 使用正確的 API 獲取語音內容
+        message_content = line_bot_api.get_message_content_by_id(
+            message_id=event.message.id
+        )
+        
+        # 將語音內容保存為臨時文件
+        with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio_file:
+            for chunk in message_content.iter_content():
+                temp_audio_file.write(chunk)
+            temp_audio_file.flush()
+            temp_audio_path = temp_audio_file.name
+
+        # 將 m4a 轉換為 wav
+        wav_path = temp_audio_path.replace('.m4a', '.wav')
+        audio = AudioSegment.from_file(temp_audio_path, format="m4a")
+        audio.export(wav_path, format="wav")
+
+        # 使用 Google Speech Recognition
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(wav_path) as source:
+            audio = recognizer.record(source)
+            text = recognizer.recognize_google(audio, language='zh-TW')
+            logger.info(f"語音轉文字結果: {text}")
+
+        # 使用 ChatGPT 解析文字內容
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """你是一個行程解析助手。請將用戶的語音轉文字結果轉換成結構化的時間資訊。
+                    輸出格式要求：
+                    {
+                        "date_type": "今天|明天|後天|大後天|下週一|下週二|下週三|下週四|下週五|下週六|下週日|下下週一|下下週二|下下週三|下下週四|下下週五|下下週六|下下週日|連續X個週Y",
+                        "time_period": "上午|下午",
+                        "hour": "小時數字",
+                        "minute": "分鐘數字",
+                        "duration_minutes": "行程持續時間（分鐘）",
+                        "is_recurring": false,
+                        "recurrence_count": null,
+                        "summary": "事件描述"
+                    }
+                    """
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ],
+            temperature=0
+        )
+
+        # 解析 ChatGPT 的回應
         try:
-            send_line_message(
-                event.reply_token, 
-                "非常抱歉，我在處理您的語音訊息時遇到了問題 😅\n請稍後再試一次，或直接輸入文字。"
-            )
+            parsed_data = json.loads(response.choices[0].message.content)
+            logger.info(f"ChatGPT 解析結果: {parsed_data}")
+            
+            # 建立行事曆事件
+            success, result = create_calendar_event(event.source.user_id, parsed_data)
+            
+            if success:
+                send_line_message(event.reply_token, result)
+            else:
+                send_line_message(event.reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"解析 ChatGPT 回應時發生錯誤: {str(e)}")
+            send_line_message(event.reply_token, "抱歉，我無法理解您的語音內容。請試著說得更清楚一些。")
+
+    except sr.UnknownValueError:
+        logger.error("Google Speech Recognition 無法理解語音")
+        send_line_message(event.reply_token, "抱歉，我聽不清楚您說的內容。請再說一次。")
+        
+    except sr.RequestError as e:
+        logger.error(f"無法連接到 Google Speech Recognition 服務: {str(e)}")
+        send_line_message(event.reply_token, "抱歉，語音識別服務暫時無法使用。請稍後再試。")
+        
+    except Exception as e:
+        logger.error(f"處理語音訊息時發生錯誤: {str(e)}")
+        logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
+        send_line_message(event.reply_token, "抱歉，處理語音訊息時發生錯誤。請稍後再試。")
+        
+    finally:
+        # 清理臨時文件
+        try:
+            if 'temp_audio_path' in locals():
+                os.unlink(temp_audio_path)
+            if 'wav_path' in locals():
+                os.unlink(wav_path)
         except Exception as e:
-            logger.error(f'發送錯誤訊息時也發生錯誤: {str(e)}')
+            logger.error(f"清理臨時文件時發生錯誤: {str(e)}")
 
 @with_db_connection
 def save_event(conn, line_user_id, event_id, summary, start_time, end_time):
