@@ -422,86 +422,86 @@ def save_user_credentials(conn, line_user_id, credentials):
 def get_google_calendar_service(line_user_id=None):
     """取得使用者的 Google Calendar 服務"""
     try:
-        if line_user_id:
-            # 如果提供了 line_user_id，嘗試獲取用戶的憑證
-            creds_dict = get_user_credentials(line_user_id)
-            if not creds_dict:
-                # 如果沒有憑證，返回授權 URL
-                credentials_json = os.getenv('GOOGLE_CREDENTIALS')
-                if not credentials_json:
-                    return None, "未設定 GOOGLE_CREDENTIALS 環境變數"
-                
-                try:
-                    credentials_info = json.loads(credentials_json)
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-                        json.dump(credentials_info, temp_file)
-                        temp_file_path = temp_file.name
-                    
-                    # 確保使用 HTTPS
-                    app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
-                    if not app_url.startswith('https://'):
-                        app_url = f"https://{app_url.replace('http://', '')}"
-                    redirect_uri = f"{app_url}/oauth2callback"
-                    
-                    logger.info(f"使用重定向 URI: {redirect_uri}")
-                    
-                    # 設定 OAuth 2.0 流程
-                    flow = Flow.from_client_secrets_file(
-                        temp_file_path,
-                        SCOPES,
-                        redirect_uri=redirect_uri
-                    )
-                    os.unlink(temp_file_path)
-                    
-                    # 生成授權 URL
-                    authorization_url, _ = flow.authorization_url(
-                        access_type='offline',
-                        include_granted_scopes='true',
-                        state=line_user_id,
-                        prompt='consent',  # 強制顯示同意畫面
-                        login_hint='',  # 允許用戶選擇帳號
-                        openid_realm=app_url  # 設定 OpenID realm
-                    )
-                    
-                    logger.info(f"生成授權 URL: {authorization_url}")
-                    return None, authorization_url
-                    
-                except json.JSONDecodeError:
-                    return None, "GOOGLE_CREDENTIALS 環境變數格式錯誤"
-                except Exception as e:
-                    logger.error(f"初始化 Google Calendar 流程時發生錯誤：{str(e)}")
-                    return None, f"無法初始化 Google Calendar 授權流程：{str(e)}"
+        if not line_user_id:
+            return None, "未提供用戶 ID"
+
+        # 嘗試獲取用戶的憑證
+        creds_dict = get_user_credentials(line_user_id)
+        if not creds_dict:
+            # 如果沒有憑證，返回授權 URL
+            credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+            if not credentials_json:
+                return None, "未設定 GOOGLE_CREDENTIALS 環境變數"
             
             try:
-                # 使用憑證字典創建 Credentials 對象
-                credentials = Credentials(
-                    token=creds_dict['token'],
-                    refresh_token=creds_dict['refresh_token'],
-                    token_uri=creds_dict['token_uri'],
-                    client_id=creds_dict['client_id'],
-                    client_secret=creds_dict['client_secret'],
-                    scopes=creds_dict['scopes']
+                credentials_info = json.loads(credentials_json)
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+                    json.dump(credentials_info, temp_file)
+                    temp_file_path = temp_file.name
+                
+                # 確保使用 HTTPS
+                app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
+                if not app_url.startswith('https://'):
+                    app_url = f"https://{app_url.replace('http://', '')}"
+                redirect_uri = f"{app_url}/oauth2callback"
+                
+                logger.info(f"使用重定向 URI: {redirect_uri}")
+                
+                # 設定 OAuth 2.0 流程
+                flow = Flow.from_client_secrets_file(
+                    temp_file_path,
+                    SCOPES,
+                    redirect_uri=redirect_uri
+                )
+                os.unlink(temp_file_path)
+                
+                # 生成授權 URL
+                authorization_url, _ = flow.authorization_url(
+                    access_type='offline',
+                    include_granted_scopes='true',
+                    state=line_user_id,
+                    prompt='consent'  # 強制顯示同意畫面
                 )
                 
-                # 如果憑證過期，嘗試刷新
-                if credentials and credentials.expired and credentials.refresh_token:
-                    try:
-                        credentials.refresh(Request())
-                        # 更新資料庫中的憑證
-                        save_user_credentials(line_user_id, credentials)
-                        logger.info(f"已刷新用戶 {line_user_id} 的憑證")
-                    except Exception as e:
-                        logger.error(f"刷新憑證時發生錯誤：{str(e)}")
-                        # 如果刷新失敗，返回授權 URL
-                        return None, "憑證已過期，需要重新授權"
+                logger.info(f"生成授權 URL: {authorization_url}")
+                return None, authorization_url
                 
-                service = build('calendar', 'v3', credentials=credentials)
-                return service, None
+            except json.JSONDecodeError:
+                return None, "GOOGLE_CREDENTIALS 環境變數格式錯誤"
             except Exception as e:
-                logger.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
-                return None, "Google Calendar 服務發生錯誤"
-        else:
-            return None, "未提供用戶 ID"
+                logger.error(f"初始化 Google Calendar 流程時發生錯誤：{str(e)}")
+                return None, f"無法初始化 Google Calendar 授權流程：{str(e)}"
+        
+        try:
+            # 使用憑證字典創建 Credentials 對象
+            credentials = Credentials(
+                token=creds_dict['token'],
+                refresh_token=creds_dict['refresh_token'],
+                token_uri=creds_dict['token_uri'],
+                client_id=creds_dict['client_id'],
+                client_secret=creds_dict['client_secret'],
+                scopes=creds_dict['scopes']
+            )
+            
+            # 如果憑證過期，嘗試刷新
+            if credentials.expired and credentials.refresh_token:
+                try:
+                    credentials.refresh(Request())
+                    # 更新資料庫中的憑證
+                    save_user_credentials(line_user_id, credentials)
+                    logger.info(f"已刷新用戶 {line_user_id} 的憑證")
+                except Exception as e:
+                    logger.error(f"刷新憑證時發生錯誤：{str(e)}")
+                    # 如果刷新失敗，返回授權 URL
+                    return None, "憑證已過期，需要重新授權"
+            
+            # 建立服務
+            service = build('calendar', 'v3', credentials=credentials)
+            return service, None
+            
+        except Exception as e:
+            logger.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
+            return None, "Google Calendar 服務發生錯誤"
     except Exception as e:
         logger.error(f"Google Calendar 服務發生未預期錯誤：{str(e)}")
         return None, f"系統錯誤：{str(e)}"
