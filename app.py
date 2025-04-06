@@ -17,10 +17,10 @@ from linebot.v3.messaging import (
     ApiClient,
     MessagingApi,
     ReplyMessageRequest,
-    TextMessage,
-    TextSendMessage
+    TextMessage
 )
 from linebot.v3.messaging.models import (
+    TextMessage as TextSendMessage,
     AudioMessage
 )
 from linebot.v3.webhooks.models import MessageContent
