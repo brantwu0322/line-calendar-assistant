@@ -1314,14 +1314,15 @@ def handle_audio_message(event):
             response = line_bot_api.get_message_content(
                 message_id=event.message.id
             )
-        
-        # 將語音內容保存為臨時文件
-        with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio_file:
-            for chunk in response.iter_content():
-                temp_audio_file.write(chunk)
-            temp_audio_file.flush()
-            temp_audio_path = temp_audio_file.name
-            logger.info(f"已保存語音檔案：{temp_audio_path}")
+            
+            # 將語音內容保存為臨時文件
+            with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio_file:
+                # 直接讀取響應內容
+                audio_content = response.content
+                temp_audio_file.write(audio_content)
+                temp_audio_file.flush()
+                temp_audio_path = temp_audio_file.name
+                logger.info(f"已保存語音檔案：{temp_audio_path}")
 
         # 將 m4a 轉換為 wav
         wav_path = temp_audio_path.replace('.m4a', '.wav')
