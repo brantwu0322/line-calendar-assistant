@@ -1286,8 +1286,53 @@ def internal_server_error(e):
 @handler.add(MessageEvent, message=AudioMessageContent)
 def handle_audio_message(event):
     """處理語音訊息"""
+    temp_audio_path = None
+    wav_path = None
     try:
-        logger.info(f"收到語音訊息，用戶 ID: {event.source.user_id}")
+        # 下載音訊檔案
+        message_content = line_bot_api.get_message_content(event.message.id)
+        temp_audio_path = tempfile.mktemp(suffix='.m4a')
+        wav_path = tempfile.mktemp(suffix='.wav')
+
+        try:
+            with open(temp_audio_path, 'wb') as f:
+                for chunk in message_content.iter_content():
+                    f.write(chunk)
+            logging.info(f"成功下載音訊檔案，大小：{os.path.getsize(temp_audio_path)} bytes")
+        except Exception as e:
+            logging.error(f"下載音訊檔案時發生錯誤：{str(e)}")
+            raise Exception("下載音訊檔案失敗")
+
+        try:
+            # 使用 pydub 轉換音訊格式
+            audio = AudioSegment.from_file(temp_audio_path)
+            audio = audio.set_frame_rate(16000)
+            audio = audio.set_channels(1)
+            audio.export(wav_path, format="wav")
+            logging.info(f"成功轉換音訊格式：{wav_path}")
+        except Exception as e:
+            logging.error(f"轉換音訊格式時發生錯誤：{str(e)}")
+            raise Exception("轉換音訊格式失敗")
+
+        try:
+            # 使用 SpeechRecognition 進行語音識別
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(wav_path) as source:
+                audio_data = recognizer.record(source)
+                text = recognizer.recognize_google(audio_data, language='zh-TW')
+                logging.info(f"成功識別語音內容：{text}")
+                # 將簡體中文轉換為繁體中文
+                text = converter.convert(text)
+                logging.info(f"成功識別語音內容（繁體）：{text}")
+        except sr.UnknownValueError:
+            logging.error("無法識別語音內容")
+            raise Exception("無法識別語音內容")
+            
+        # 解析文字內容
+        event_data = parse_event_text(text)
+        if not event_data:
+            send_line_message(event.reply_token, "抱歉，我無法理解您說的時間。請試著說得更清楚一些。")
+            return
         
         # 檢查用戶是否已授權
         service, error = get_google_calendar_service(event.source.user_id)
@@ -1308,89 +1353,13 @@ def handle_audio_message(event):
             send_line_message(event.reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
             return
         
-        # 使用正確的 API 獲取語音內容
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            response = line_bot_api.get_message_content_v2_message_id_get(
-                message_id=event.message.id
-            )
-            
-            # 將語音內容保存為臨時文件
-            with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio_file:
-                # 直接讀取響應內容
-                audio_content = response.content
-                temp_audio_file.write(audio_content)
-                temp_audio_file.flush()
-                temp_audio_path = temp_audio_file.name
-                logger.info(f"已保存語音檔案：{temp_audio_path}")
-
-        # 將 m4a 轉換為 wav
-        wav_path = temp_audio_path.replace('.m4a', '.wav')
-        try:
-            audio = AudioSegment.from_file(temp_audio_path, format="m4a")
-            audio.export(wav_path, format="wav")
-            logger.info(f"已轉換為 WAV 檔案：{wav_path}")
-        except Exception as e:
-            logger.error(f"音頻轉換失敗：{str(e)}")
-            raise
-
-        # 使用 Google Speech Recognition
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(wav_path) as source:
-            audio = recognizer.record(source)
-            text = recognizer.recognize_google(audio, language='zh-TW')
-            logger.info(f"語音轉文字結果: {text}")
-
-        # 使用 ChatGPT 解析文字內容
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """你是一個行程解析助手。請將用戶的語音轉文字結果轉換成結構化的時間資訊。
-                    輸出格式要求：
-                    {
-                        "date_type": "今天|明天|後天|大後天|下週一|下週二|下週三|下週四|下週五|下週六|下週日|下下週一|下下週二|下下週三|下下週四|下下週五|下下週六|下下週日|連續X個週Y",
-                        "time_period": "上午|下午",
-                        "hour": "小時數字",
-                        "minute": "分鐘數字",
-                        "duration_minutes": "行程持續時間（分鐘）",
-                        "is_recurring": false,
-                        "recurrence_count": null,
-                        "summary": "事件描述"
-                    }
-                    """
-                },
-                {
-                    "role": "user",
-                    "content": text
-                }
-            ],
-            temperature=0
-        )
-
-        # 解析 ChatGPT 的回應
-        try:
-            parsed_data = json.loads(response.choices[0].message.content)
-            logger.info(f"ChatGPT 解析結果: {parsed_data}")
-            
-            # 解析日期時間
-            event_data = parse_event_text(text)
-            if not event_data:
-                send_line_message(event.reply_token, "抱歉，我無法理解您說的時間。請試著說得更清楚一些。")
-                return
-                
-            # 建立行事曆事件
-            success, result = create_calendar_event(service, event_data, event.source.user_id)
-            
-            if success:
-                send_line_message(event.reply_token, result)
-            else:
-                send_line_message(event.reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"解析 ChatGPT 回應時發生錯誤: {str(e)}")
-            send_line_message(event.reply_token, "抱歉，我無法理解您的語音內容。請試著說得更清楚一些。")
+        # 建立行事曆事件
+        success, result = create_calendar_event(service, event_data, event.source.user_id)
+        
+        if success:
+            send_line_message(event.reply_token, result)
+        else:
+            send_line_message(event.reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
 
     except sr.UnknownValueError:
         logger.error("Google Speech Recognition 無法理解語音")
