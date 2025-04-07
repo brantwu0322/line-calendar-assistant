@@ -1311,7 +1311,7 @@ def handle_audio_message(event):
         # 使用正確的 API 獲取語音內容
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-            response = line_bot_api.get_message_content(
+            response = line_bot_api.get_message_content_v2_message_id_get(
                 message_id=event.message.id
             )
             
