@@ -43,6 +43,7 @@ from dotenv import load_dotenv
 from flask_session import Session
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
+from googleapiclient.errors import HttpError
 
 # 設定日誌
 logging.basicConfig(
@@ -1290,18 +1291,22 @@ def handle_audio_message(event):
     wav_path = None
     try:
         # 下載音訊檔案
-        message_content = line_bot_api.get_message_content(event.message.id)
-        temp_audio_path = tempfile.mktemp(suffix='.m4a')
-        wav_path = tempfile.mktemp(suffix='.wav')
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            response = line_bot_api.get_message_content_v2_message_id_get(
+                message_id=event.message.id
+            )
+            
+            temp_audio_path = tempfile.mktemp(suffix='.m4a')
+            wav_path = tempfile.mktemp(suffix='.wav')
 
-        try:
-            with open(temp_audio_path, 'wb') as f:
-                for chunk in message_content.iter_content():
-                    f.write(chunk)
-            logging.info(f"成功下載音訊檔案，大小：{os.path.getsize(temp_audio_path)} bytes")
-        except Exception as e:
-            logging.error(f"下載音訊檔案時發生錯誤：{str(e)}")
-            raise Exception("下載音訊檔案失敗")
+            try:
+                with open(temp_audio_path, 'wb') as f:
+                    f.write(response.content)
+                logging.info(f"成功下載音訊檔案，大小：{os.path.getsize(temp_audio_path)} bytes")
+            except Exception as e:
+                logging.error(f"下載音訊檔案時發生錯誤：{str(e)}")
+                raise Exception("下載音訊檔案失敗")
 
         try:
             # 使用 pydub 轉換音訊格式
@@ -1335,56 +1340,41 @@ def handle_audio_message(event):
             return
         
         # 檢查用戶是否已授權
-        service, error = get_google_calendar_service(event.source.user_id)
-        if error and isinstance(error, str) and 'accounts.google.com' in error:
-            # 如果是授權 URL，提供更友善的提示
-            auth_message = (
-                "您好！為了幫您安排行程，我需要先取得您的 Google Calendar 授權喔 😊\n\n"
-                "請按照以下步驟進行授權：\n"
-                "1. 複製下方連結\n"
-                "2. 使用手機瀏覽器（Safari 或 Chrome）開啟\n"
-                "3. 登入您的 Google 帳號並同意授權\n\n"
-                f"{error}\n\n"
-                "完成授權後，請再次傳送語音訊息給我 🙂"
-            )
-            send_line_message(event.reply_token, auth_message)
+        user_id = event.source.user_id
+        credentials = get_user_credentials(user_id)
+        if not credentials:
+            send_line_message(event.reply_token, "您尚未授權存取 Google 日曆。請先完成授權流程。")
             return
-        elif error:
-            send_line_message(event.reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
+
+        # 建立 Google Calendar 事件
+        try:
+            service = build('calendar', 'v3', credentials=credentials)
+            event = service.events().insert(
+                calendarId='primary',
+                body=event_data
+            ).execute()
+            logging.info(f"成功建立事件：{event.get('htmlLink')}")
+            send_line_message(event.reply_token, f"已成功建立行程！\n\n📅 事件：{event_data['summary']}\n⏰ 時間：{event_data['start']['dateTime']} - {event_data['end']['dateTime']}\n\n您可以在 Google 日曆中查看詳細資訊。")
+        except HttpError as error:
+            logging.error(f"建立事件時發生錯誤：{str(error)}")
+            send_line_message(event.reply_token, f"抱歉，發生了一點問題：{str(error)}\n請稍後再試，或聯繫系統管理員協助 🙏")
             return
-        
-        # 建立行事曆事件
-        success, result = create_calendar_event(service, event_data, event.source.user_id)
-        
-        if success:
-            send_line_message(event.reply_token, result)
         else:
             send_line_message(event.reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
-
-    except sr.UnknownValueError:
-        logger.error("Google Speech Recognition 無法理解語音")
-        send_line_message(event.reply_token, "抱歉，我聽不清楚您說的內容。請再說一次。")
-        
-    except sr.RequestError as e:
-        logger.error(f"無法連接到 Google Speech Recognition 服務: {str(e)}")
-        send_line_message(event.reply_token, "抱歉，語音識別服務暫時無法使用。請稍後再試。")
-        
+            
     except Exception as e:
-        logger.error(f"處理語音訊息時發生錯誤: {str(e)}")
-        logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
-        send_line_message(event.reply_token, "抱歉，處理語音訊息時發生錯誤。請稍後再試。")
-        
+        logging.error(f"處理語音訊息時發生錯誤: {str(e)}")
+        logging.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
+        send_line_message(event.reply_token, "抱歉，我在處理您的語音訊息時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
     finally:
         # 清理臨時文件
         try:
-            if 'temp_audio_path' in locals():
+            if temp_audio_path and os.path.exists(temp_audio_path):
                 os.unlink(temp_audio_path)
-                logger.info(f"已刪除臨時音頻檔案：{temp_audio_path}")
-            if 'wav_path' in locals():
+            if wav_path and os.path.exists(wav_path):
                 os.unlink(wav_path)
-                logger.info(f"已刪除臨時 WAV 檔案：{wav_path}")
         except Exception as e:
-            logger.error(f"清理臨時文件時發生錯誤: {str(e)}")
+            logging.error(f"清理臨時文件時發生錯誤: {str(e)}")
 
 @with_db_connection
 def save_event(conn, line_user_id, event_id, summary, start_time, end_time):
