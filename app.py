@@ -1310,22 +1310,28 @@ def handle_audio_message(event):
         
         # 使用正確的 API 獲取語音內容
         with ApiClient(configuration) as api_client:
-            messaging_api = MessagingApi(api_client)
-            message_content = messaging_api.get_message_content_v2_message_content_get(
+            line_bot_api = MessagingApi(api_client)
+            response = line_bot_api.get_message_content_v2_message_content_get(
                 message_id=event.message.id
             )
         
         # 將語音內容保存為臨時文件
         with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio_file:
-            for chunk in message_content.iter_content():
+            for chunk in response.iter_content():
                 temp_audio_file.write(chunk)
             temp_audio_file.flush()
             temp_audio_path = temp_audio_file.name
+            logger.info(f"已保存語音檔案：{temp_audio_path}")
 
         # 將 m4a 轉換為 wav
         wav_path = temp_audio_path.replace('.m4a', '.wav')
-        audio = AudioSegment.from_file(temp_audio_path, format="m4a")
-        audio.export(wav_path, format="wav")
+        try:
+            audio = AudioSegment.from_file(temp_audio_path, format="m4a")
+            audio.export(wav_path, format="wav")
+            logger.info(f"已轉換為 WAV 檔案：{wav_path}")
+        except Exception as e:
+            logger.error(f"音頻轉換失敗：{str(e)}")
+            raise
 
         # 使用 Google Speech Recognition
         recognizer = sr.Recognizer()
@@ -1403,8 +1409,10 @@ def handle_audio_message(event):
         try:
             if 'temp_audio_path' in locals():
                 os.unlink(temp_audio_path)
+                logger.info(f"已刪除臨時音頻檔案：{temp_audio_path}")
             if 'wav_path' in locals():
                 os.unlink(wav_path)
+                logger.info(f"已刪除臨時 WAV 檔案：{wav_path}")
         except Exception as e:
             logger.error(f"清理臨時文件時發生錯誤: {str(e)}")
 
