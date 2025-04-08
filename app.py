@@ -798,6 +798,7 @@ def parse_date_query(text):
                     6. 對於「下週X」格式，保持原樣
                     7. 如果用戶輸入「查詢 X/Y 的行程」，將其轉換為「查詢 X月Y日 的行程」
                     8. 如果用戶輸入「查詢下週X的行程」，保持原樣
+                    9. 對於 X/Y 格式的日期，如果月份小於當前月份，則視為明年
                     
                     範例：
                     1. 輸入：「查詢行程」
@@ -1064,9 +1065,9 @@ def handle_message(event):
                         
                         # 格式化時間
                         if 'T' in start:  # 有具體時間的行程
-                            time_str = f"{start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}"
+                            time_str = f"{start_time.strftime('%Y年%m月%d日 %H:%M')} - {end_time.strftime('%H:%M')}"
                         else:  # 全天行程
-                            time_str = "全天"
+                            time_str = f"{start_time.strftime('%Y年%m月%d日')} (全天)"
                         
                         message += f"⏰ {time_str}\n"
                         message += f"📝 {event['summary']}\n"
