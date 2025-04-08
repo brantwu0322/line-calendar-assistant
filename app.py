@@ -105,6 +105,7 @@ def with_db_connection(func):
         conn = None
         try:
             conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
             return func(conn, *args, **kwargs)
         except Exception as e:
             logger.error(f'資料庫操作錯誤: {str(e)}')
@@ -384,42 +385,52 @@ def get_user_credentials(conn, line_user_id):
             return None
     return None
 
+def get_db_connection():
+    """獲取資料庫連接"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception as e:
+        logger.error(f"連接資料庫時發生錯誤: {str(e)}")
+        raise
+
 @with_db_connection
 def save_user_credentials(conn, line_user_id, credentials):
     """保存用戶認證"""
-    c = conn.cursor()
-    
-    # 將憑證轉換為字典格式
-    creds_dict = {
-        'token': credentials.token,
-        'refresh_token': credentials.refresh_token,
-        'token_uri': credentials.token_uri,
-        'client_id': credentials.client_id,
-        'client_secret': credentials.client_secret,
-        'scopes': credentials.scopes
-    }
-    
     try:
+        cursor = conn.cursor()
+        
+        # 將憑證轉換為字典格式
+        creds_dict = {
+            'token': credentials.token,
+            'refresh_token': credentials.refresh_token,
+            'token_uri': credentials.token_uri,
+            'client_id': credentials.client_id,
+            'client_secret': credentials.client_secret,
+            'scopes': credentials.scopes
+        }
+        
         # 檢查用戶是否已存在
-        c.execute('SELECT line_user_id FROM users WHERE line_user_id = ?', (line_user_id,))
-        user_exists = c.fetchone() is not None
+        cursor.execute('SELECT line_user_id FROM users WHERE line_user_id = ?', (line_user_id,))
+        user_exists = cursor.fetchone() is not None
         
         if user_exists:
             # 如果用戶已存在，只更新 google_credentials
-            c.execute('UPDATE users SET google_credentials = ? WHERE line_user_id = ?',
-                     (json.dumps(creds_dict), line_user_id))
+            cursor.execute('UPDATE users SET google_credentials = ? WHERE line_user_id = ?',
+                         (json.dumps(creds_dict), line_user_id))
         else:
             # 如果用戶不存在，創建新用戶
-            c.execute('''
+            cursor.execute('''
             INSERT INTO users (line_user_id, google_credentials, subscription_status, subscription_end_date)
             VALUES (?, ?, 'free', NULL)
             ''', (line_user_id, json.dumps(creds_dict)))
         
         conn.commit()
         logger.info(f"已儲存用戶 {line_user_id} 的憑證")
+        return True
     except Exception as e:
         logger.error(f"儲存用戶憑證時發生錯誤: {str(e)}")
-        conn.rollback()
         raise
 
 def get_google_calendar_service(line_user_id=None):
@@ -1246,7 +1257,8 @@ def admin_dashboard():
     return render_template('admin_dashboard.html', users=users)
 
 @app.route('/oauth2callback')
-def oauth2callback():
+@with_db_connection
+def oauth2callback(conn):
     """處理 Google OAuth 回調"""
     try:
         # 獲取授權碼和狀態
@@ -1302,11 +1314,9 @@ def oauth2callback():
                 
                 if email:
                     # 更新用戶的 Google 電子郵件
-                    conn = get_db_connection()
                     cursor = conn.cursor()
                     cursor.execute('UPDATE users SET google_email = ? WHERE line_user_id = ?', (email, line_user_id))
                     conn.commit()
-                    conn.close()
                     
                     return render_template('oauth_success.html')
                 else:
