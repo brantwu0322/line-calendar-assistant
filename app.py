@@ -1013,9 +1013,10 @@ def handle_message(event):
             return
             
         # 查詢行程
-        if any(keyword in text for keyword in ['查詢行程', '查看行程', '我的行程']):
+        if any(keyword in text for keyword in ['查詢行程', '查看行程', '我的行程']) or '的行程' in text:
             try:
                 # 解析日期查詢
+                logger.info(f"開始解析日期查詢：{text}")
                 date_query = parse_date_query(text)
                 if date_query:
                     start_date, end_date, is_range = date_query
