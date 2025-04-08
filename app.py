@@ -660,14 +660,9 @@ def parse_event_text(text):
             current_weekday = today.weekday()
             
             # 計算到下週目標日期的天數
-            days_ahead = target_weekday - current_weekday  # 目標日期與當前日期的差距
-            
-            # 確保是下週的日期
-            if days_ahead <= 0:  # 如果目標日期在本週，加 7 天到下週
-                days_ahead += 7
-            
-            # 再加 7 天確保是下週
-            days_ahead += 7
+            days_ahead = (target_weekday - current_weekday) % 7
+            if days_ahead <= 0:
+                days_ahead += 7  # 如果目標日期在本週或之前，加7天到下週
             
             # 計算目標日期
             target_date = today + timedelta(days=days_ahead)
@@ -892,14 +887,9 @@ def parse_date_query(text):
                 current_weekday = today.weekday()
                 
                 # 計算到下週目標日期的天數
-                days_ahead = target_weekday - current_weekday  # 目標日期與當前日期的差距
-                
-                # 確保是下週的日期
-                if days_ahead <= 0:  # 如果目標日期在本週，加 7 天到下週
-                    days_ahead += 7
-                
-                # 再加 7 天確保是下週
-                days_ahead += 7
+                days_ahead = (target_weekday - current_weekday) % 7
+                if days_ahead <= 0:
+                    days_ahead += 7  # 如果目標日期在本週或之前，加7天到下週
                 
                 # 計算目標日期
                 target_date = today + timedelta(days=days_ahead)
