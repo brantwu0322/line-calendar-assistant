@@ -921,6 +921,33 @@ def parse_date_query(text):
                 target_date = today.replace(month=month, day=day)
                 if target_date < today:
                     target_date = target_date.replace(year=target_date.year + 1)
+            elif date_str.startswith('週'):
+                weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
+                target_weekday = weekday_map[date_str[1]]
+                current_weekday = today.weekday()
+                
+                # 計算到目標日期的天數
+                days_ahead = (target_weekday - current_weekday) % 7
+                if days_ahead == 0:
+                    days_ahead = 7  # 如果是今天，顯示下週的日期
+                
+                # 計算目標日期
+                target_date = today + timedelta(days=days_ahead)
+                
+                logger.info(f"計算週X日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，需要 {days_ahead} 天")
+            elif date_str.startswith('下週'):
+                weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
+                target_weekday = weekday_map[date_str[2]]
+                current_weekday = today.weekday()
+                
+                # 計算到下週目標日期的天數
+                days_ahead = (target_weekday - current_weekday) % 7
+                days_ahead += 7  # 確保是下週
+                
+                # 計算目標日期
+                target_date = today + timedelta(days=days_ahead)
+                
+                logger.info(f"計算下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，需要 {days_ahead} 天")
             else:
                 logger.info(f"無法解析的日期格式：{date_str}")
                 return None
