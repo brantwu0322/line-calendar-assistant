@@ -61,7 +61,21 @@ DB_PATH = os.path.join(os.getenv('RENDER_DB_PATH', os.path.dirname(os.path.abspa
 logger.info(f"Database path: {DB_PATH}")
 
 # 確保資料庫目錄存在
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+try:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    logger.info(f"確保資料庫目錄存在：{os.path.dirname(DB_PATH)}")
+except Exception as e:
+    logger.error(f"創建資料庫目錄時發生錯誤：{str(e)}")
+    raise
+
+# 初始化資料庫連接
+try:
+    init_db()
+    logger.info("資料庫初始化成功")
+except Exception as e:
+    logger.error(f"資料庫初始化失敗：{str(e)}")
+    logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
+    raise
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')

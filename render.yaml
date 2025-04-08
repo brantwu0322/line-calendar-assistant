@@ -4,10 +4,16 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:10000 --timeout 120
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.18
       - key: PORT
         value: 10000
       - key: PYTHONUNBUFFERED
-        value: "true" 
+        value: "true"
+      - key: RENDER_DB_PATH
+        value: /data 
