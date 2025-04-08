@@ -797,10 +797,11 @@ def parse_date_query(text):
                     5. 對於 X/Y 格式的日期（如 4/9），將其轉換為 "X月Y日" 格式
                     6. 對於「下週X」格式，保持原樣
                     7. 如果用戶輸入「查詢 X/Y 的行程」，將其轉換為「查詢 X月Y日 的行程」
-                    8. 如果用戶輸入「查詢下週X的行程」，保持原樣
+                    8. 如果用戶輸入「查詢下週X的行程」，將 date_type 設為 "下週X"，不需要設定 start_date 和 end_date
                     9. 對於 X/Y 格式的日期，如果月份小於當前月份，則視為明年
                     10. 對於「下週X」格式，直接返回該格式，不需要轉換為具體日期
                     11. 如果用戶輸入「查詢下週X的行程」，將 date_type 設為 "下週X"，不需要設定 start_date 和 end_date
+                    12. 如果用戶輸入「查詢下週X的行程」，直接返回 {"date_type": "下週X", "is_date_range": false, "start_date": null, "end_date": null}
                     
                     範例：
                     1. 輸入：「查詢行程」
