@@ -460,8 +460,7 @@ def get_google_calendar_service(line_user_id=None):
                 authorization_url, _ = flow.authorization_url(
                     access_type='offline',
                     include_granted_scopes='true',
-                    state=line_user_id,
-                    prompt='consent'  # 強制顯示同意畫面
+                    state=line_user_id
                 )
                 
                 logger.info(f"生成授權 URL: {authorization_url}")
