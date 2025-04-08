@@ -68,6 +68,17 @@ def get_db_connection():
         logger.error(f"資料庫連接錯誤: {e}")
         return None
 
+# 從環境變數讀取 Google 憑證
+def get_google_credentials_from_env():
+    try:
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+        if not credentials_json:
+            raise ValueError("GOOGLE_CREDENTIALS 環境變數未設定")
+        return json.loads(credentials_json)
+    except Exception as e:
+        logger.error(f"從環境變數讀取 Google 憑證時發生錯誤: {e}")
+        return None
+
 # 檢查並更新 Google 授權
 def check_and_refresh_google_credentials(user_id):
     connection = get_db_connection()
@@ -394,9 +405,14 @@ def handle_event_deletion(user_id, text):
 # 處理授權請求
 def handle_authorization_request(user_id):
     try:
+        # 從環境變數讀取憑證
+        credentials_dict = get_google_credentials_from_env()
+        if not credentials_dict:
+            return "無法讀取 Google 憑證，請聯繫管理員"
+        
         # 建立授權流程
-        flow = InstalledAppFlow.from_client_secrets_file(
-            os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json'),
+        flow = InstalledAppFlow.from_client_config(
+            credentials_dict,
             ['https://www.googleapis.com/auth/calendar']
         )
         flow.redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', 'https://line-calendar-assistant.onrender.com/oauth2callback')
@@ -447,12 +463,17 @@ def oauth2callback():
             
             user_id = result['line_user_id']
             
+            # 從環境變數讀取憑證
+            credentials_dict = get_google_credentials_from_env()
+            if not credentials_dict:
+                return "授權失敗：無法讀取 Google 憑證"
+            
             # 建立授權流程
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json',
+            flow = InstalledAppFlow.from_client_config(
+                credentials_dict,
                 ['https://www.googleapis.com/auth/calendar']
             )
-            flow.redirect_uri = 'https://line-calendar-assistant.onrender.com/oauth2callback'
+            flow.redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', 'https://line-calendar-assistant.onrender.com/oauth2callback')
             
             # 取得憑證
             flow.fetch_token(code=code)
