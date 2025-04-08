@@ -1716,6 +1716,70 @@ def check_google_auth(user_id):
         logger.error(f"檢查授權狀態時發生錯誤: {str(e)}")
         return False
 
+def get_db_connection():
+    """建立資料庫連接"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception as e:
+        logger.error(f"建立資料庫連接時發生錯誤: {str(e)}")
+        raise
+
+def get_auth_url(user_id):
+    """獲取 Google 日曆授權 URL"""
+    try:
+        # 從環境變數獲取憑證
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+        if not credentials_json:
+            logger.error("GOOGLE_CREDENTIALS not found in environment variables")
+            return None
+
+        # 創建臨時憑證文件
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+            json.dump(json.loads(credentials_json), temp_file)
+            temp_file_path = temp_file.name
+
+        try:
+            # 確保使用 HTTPS
+            app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
+            if not app_url.startswith('https://'):
+                app_url = f"https://{app_url.replace('http://', '')}"
+            redirect_uri = f"{app_url}/oauth2callback"
+            
+            logger.info(f"使用重定向 URI: {redirect_uri}")
+            
+            flow = Flow.from_client_secrets_file(
+                temp_file_path,
+                SCOPES,
+                redirect_uri=redirect_uri
+            )
+            
+            # 生成授權 URL
+            authorization_url, _ = flow.authorization_url(
+                access_type='offline',
+                include_granted_scopes='true',
+                state=user_id,
+                prompt='consent'  # 強制顯示同意畫面
+            )
+            
+            logger.info(f"生成授權 URL: {authorization_url}")
+            return authorization_url
+            
+        except Exception as e:
+            logger.error(f"生成授權 URL 時發生錯誤: {str(e)}")
+            return None
+            
+        finally:
+            # 清理臨時文件
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+                logger.info(f"已清理臨時文件: {temp_file_path}")
+                
+    except Exception as e:
+        logger.error(f"獲取授權 URL 時發生錯誤: {str(e)}")
+        return None
+
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
     logger.info(f"LINE_CHANNEL_ACCESS_TOKEN: {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')[:10]}...")
