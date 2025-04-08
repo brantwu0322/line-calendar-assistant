@@ -1732,6 +1732,120 @@ def delete_user(conn, line_user_id):
         conn.rollback()
         return False
 
+def handle_event_modification(text, user_id):
+    """處理行程修改請求"""
+    try:
+        # 先嘗試解析日期
+        date_result = parse_date_query(text)
+        if date_result and 'date' in date_result:
+            target_date = date_result['date']
+            
+            # 獲取該日期的所有行程
+            events = get_events(user_id, target_date, target_date)
+            if not events:
+                return "該日期沒有行程可以修改。"
+            
+            # 顯示該日期的所有行程
+            response = f"以下是 {target_date} 的行程：\n\n"
+            for i, event in enumerate(events, 1):
+                response += f"{i}. {event['summary']}\n"
+                if 'description' in event and event['description']:
+                    response += f"   說明：{event['description']}\n"
+                if 'location' in event and event['location']:
+                    response += f"   地點：{event['location']}\n"
+                response += f"   時間：{event['start_time']} - {event['end_time']}\n\n"
+            
+            response += "請輸入要修改的行程編號，例如：修改第1個行程"
+            return response
+        
+        # 如果已經有行程編號，則進行修改
+        if "修改第" in text and "個行程" in text:
+            try:
+                # 提取行程編號
+                event_index = int(text.split("修改第")[1].split("個行程")[0]) - 1
+                
+                # 獲取該日期的所有行程
+                events = get_events(user_id, target_date, target_date)
+                if not events or event_index >= len(events):
+                    return "找不到指定的行程，請確認行程編號是否正確。"
+                
+                event = events[event_index]
+                event_id = event['id']
+                
+                # 解析新的行程資訊
+                event_text = text.split("個行程")[1].strip()
+                if not event_text:
+                    return "請提供新的行程資訊，格式：修改第X個行程 新行程資訊"
+                
+                # 解析新的行程資訊
+                event_info = parse_event_text(event_text)
+                if not event_info:
+                    return "無法解析新的行程資訊，請確認格式是否正確。"
+                
+                # 更新行程
+                update_event(user_id, event_id, event_info)
+                return f"已成功修改行程：{event_info['summary']}"
+                
+            except (ValueError, IndexError):
+                return "行程編號格式不正確，請使用：修改第X個行程 新行程資訊"
+        
+        return "請先指定要修改的日期，例如：修改4/9的行程"
+    except Exception as e:
+        logger.error(f"修改行程時發生錯誤: {str(e)}")
+        return "修改行程時發生錯誤，請稍後再試。"
+
+def handle_event_deletion(text, user_id):
+    """處理行程刪除請求"""
+    try:
+        # 先嘗試解析日期
+        date_result = parse_date_query(text)
+        if date_result and 'date' in date_result:
+            target_date = date_result['date']
+            
+            # 獲取該日期的所有行程
+            events = get_events(user_id, target_date, target_date)
+            if not events:
+                return "該日期沒有行程可以刪除。"
+            
+            # 顯示該日期的所有行程
+            response = f"以下是 {target_date} 的行程：\n\n"
+            for i, event in enumerate(events, 1):
+                response += f"{i}. {event['summary']}\n"
+                if 'description' in event and event['description']:
+                    response += f"   說明：{event['description']}\n"
+                if 'location' in event and event['location']:
+                    response += f"   地點：{event['location']}\n"
+                response += f"   時間：{event['start_time']} - {event['end_time']}\n\n"
+            
+            response += "請輸入要刪除的行程編號，例如：刪除第1個行程"
+            return response
+        
+        # 如果已經有行程編號，則進行刪除
+        if "刪除第" in text and "個行程" in text:
+            try:
+                # 提取行程編號
+                event_index = int(text.split("刪除第")[1].split("個行程")[0]) - 1
+                
+                # 獲取該日期的所有行程
+                events = get_events(user_id, target_date, target_date)
+                if not events or event_index >= len(events):
+                    return "找不到指定的行程，請確認行程編號是否正確。"
+                
+                event = events[event_index]
+                event_id = event['id']
+                
+                # 刪除行程
+                delete_event(user_id, event_id)
+                return "已成功刪除行程。"
+                
+            except (ValueError, IndexError):
+                return "行程編號格式不正確，請使用：刪除第X個行程"
+        
+        return "請先指定要刪除的日期，例如：刪除4/9的行程"
+    except Exception as e:
+        logger.error(f"刪除行程時發生錯誤: {str(e)}")
+        return "刪除行程時發生錯誤，請稍後再試。"
+
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
     logger.info(f"LINE_CHANNEL_ACCESS_TOKEN: {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')[:10]}...")
