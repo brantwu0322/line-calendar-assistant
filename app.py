@@ -1574,20 +1574,25 @@ def handle_audio_message(event):
         # 下載音訊檔案
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-            response = line_bot_api.get_message_content_v2_message_id_get(
-                message_id=event.message.id
-            )
-            
-            temp_audio_path = tempfile.mktemp(suffix='.m4a')
-            wav_path = tempfile.mktemp(suffix='.wav')
-
+            # 下載語音訊息
             try:
-                with open(temp_audio_path, 'wb') as f:
-                    f.write(response.content)
-                logging.info(f"成功下載音訊檔案，大小：{os.path.getsize(temp_audio_path)} bytes")
+                response = line_bot_api.get_message_content(
+                    message_id=event.message.id
+                )
             except Exception as e:
-                logging.error(f"下載音訊檔案時發生錯誤：{str(e)}")
-                raise Exception("下載音訊檔案失敗")
+                logging.error(f"下載語音訊息時發生錯誤：{str(e)}")
+                raise Exception("下載語音訊息失敗")
+
+        temp_audio_path = tempfile.mktemp(suffix='.m4a')
+        wav_path = tempfile.mktemp(suffix='.wav')
+
+        try:
+            with open(temp_audio_path, 'wb') as f:
+                f.write(response.content)
+            logging.info(f"成功下載音訊檔案，大小：{os.path.getsize(temp_audio_path)} bytes")
+        except Exception as e:
+            logging.error(f"下載音訊檔案時發生錯誤：{str(e)}")
+            raise Exception("下載音訊檔案失敗")
 
         try:
             # 使用 pydub 轉換音訊格式
