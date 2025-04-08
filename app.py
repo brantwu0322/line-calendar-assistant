@@ -1686,32 +1686,23 @@ def check_google_auth(user_id):
         # 從資料庫檢查授權狀態
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT access_token, refresh_token FROM users WHERE line_user_id = ?', (user_id,))
+        cursor.execute('SELECT google_credentials FROM users WHERE line_user_id = ?', (user_id,))
         result = cursor.fetchone()
         conn.close()
         
-        if not result:
+        if not result or not result['google_credentials']:
             return False
             
-        access_token, refresh_token = result
-        
-        # 如果沒有 access_token 和 refresh_token，表示未授權
-        if not access_token and not refresh_token:
-            return False
-            
-        # 如果有 refresh_token，表示已授權
-        if refresh_token:
-            return True
-            
-        # 如果有 access_token，檢查是否過期
+        # 解析憑證
         try:
-            service = get_google_calendar_service(user_id)
-            if service:
-                return True
-        except:
+            credentials = json.loads(result['google_credentials'])
+            if not credentials.get('refresh_token'):
+                return False
+            return True
+        except json.JSONDecodeError:
+            logger.error(f"無法解析用戶 {user_id} 的憑證 JSON")
             return False
             
-        return False
     except Exception as e:
         logger.error(f"檢查授權狀態時發生錯誤: {str(e)}")
         return False
