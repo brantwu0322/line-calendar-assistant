@@ -70,7 +70,9 @@ except Exception as e:
 
 # 初始化資料庫連接
 try:
-    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    init_db(conn)
+    conn.close()
     logger.info("資料庫初始化成功")
 except Exception as e:
     logger.error(f"資料庫初始化失敗：{str(e)}")
