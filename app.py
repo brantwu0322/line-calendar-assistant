@@ -484,8 +484,29 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     try:
+        # 取得用戶 ID
         user_id = event.source.user_id
+        
+        # 取得訊息內容
         text = event.message.text
+        
+        # 檢查是否需要授權
+        if text == '授權':
+            if not is_authorized(user_id):
+                # 建立授權 URL
+                auth_url = create_authorization_url(user_id)
+                # 回傳授權 URL 給用戶
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=f'請點擊以下連結進行授權：\n{auth_url}')
+                )
+            else:
+                # 如果已經授權，提示用戶
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text='您已經完成授權，不需要再次授權。')
+                )
+            return
         
         # 處理查詢行程
         if any(keyword in text for keyword in ['查詢行程', '查看行程', '我的行程']) or '的行程' in text:
@@ -517,15 +538,6 @@ def handle_message(event):
         # 處理新增行程
         if any(keyword in text for keyword in ['新增行程', '加入行程', '建立行程']):
             response = handle_event_addition(user_id, text)
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=response)
-            )
-            return
-        
-        # 處理授權請求
-        if any(keyword in text for keyword in ['授權', '連結', '綁定']):
-            response = handle_authorization_request(user_id)
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text=response)
