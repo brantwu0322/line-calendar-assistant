@@ -785,16 +785,16 @@ def parse_date_query(text):
                     }
                     
                     規則：
-                    1. 如果用戶只輸入「查詢行程」，將 date_type 設為 "default"，表示預設查詢未來7天
-                    2. 如果用戶詢問特定日期的行程，將 is_date_range 設為 false
-                    3. 如果用戶詢問一段時間範圍的行程，將 is_date_range 設為 true，並設定 start_date 和 end_date
-                    4. 日期格式統一使用 YYYY-MM-DD
-                    5. 對於 X/Y 格式的日期（如 4/9），將其轉換為 "X月Y日" 格式
-                    6. 對於「下週X」格式，直接返回該格式，不需要轉換為具體日期
-                    7. 如果用戶輸入「查詢 X/Y 的行程」，將其轉換為「查詢 X月Y日 的行程」
-                    8. 對於 X/Y 格式的日期，如果月份小於當前月份，則視為明年
-                    9. 當用戶輸入「查詢下週X的行程」時，將 date_type 設為「下週X」，is_date_range 設為 false
-                    10. 當用戶輸入「查詢週X的行程」時，將 date_type 設為「週X」，is_date_range 設為 false
+                    1. 如果用戶輸入「查詢行程」，將 date_type 設為 "default"
+                    2. 如果用戶輸入「查詢 X/Y 的行程」，將 date_type 設為 "X/Y"
+                    3. 如果用戶輸入「查詢週X的行程」，將 date_type 設為 "週X"
+                    4. 如果用戶輸入「查詢下週X的行程」，將 date_type 設為 "下週X"
+                    5. 如果用戶輸入「查詢 X月Y日 的行程」，將 date_type 設為 "X月Y日"
+                    6. 如果用戶輸入「查詢 X/Y 的行程」，將 date_type 設為 "X/Y"
+                    7. 如果用戶輸入「查詢下週X的行程」，將 date_type 設為 "下週X"
+                    8. 如果用戶輸入「查詢週X的行程」，將 date_type 設為 "週X"
+                    9. 如果用戶輸入「查詢 X月Y日 的行程」，將 date_type 設為 "X月Y日"
+                    10. 如果用戶輸入「查詢 X/Y 的行程」，將 date_type 設為 "X/Y"
                     
                     範例：
                     1. 輸入：「查詢行程」
@@ -807,23 +807,23 @@ def parse_date_query(text):
                     
                     2. 輸入：「查詢 4/9 的行程」
                        輸出：{
-                           "date_type": "4月9日",
+                           "date_type": "4/9",
                            "is_date_range": false,
                            "start_date": null,
                            "end_date": null
                        }
                     
-                    3. 輸入：「查詢下週三的行程」
-                       輸出：{
-                           "date_type": "下週三",
-                           "is_date_range": false,
-                           "start_date": null,
-                           "end_date": null
-                       }
-                    
-                    4. 輸入：「查詢週五的行程」
+                    3. 輸入：「查詢週五的行程」
                        輸出：{
                            "date_type": "週五",
+                           "is_date_range": false,
+                           "start_date": null,
+                           "end_date": null
+                       }
+                    
+                    4. 輸入：「查詢下週三的行程」
+                       輸出：{
+                           "date_type": "下週三",
                            "is_date_range": false,
                            "start_date": null,
                            "end_date": null
