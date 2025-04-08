@@ -1114,9 +1114,9 @@ def handle_message(event):
                         
                         # 格式化時間
                         if 'T' in start:  # 有具體時間的行程
-                            time_str = f"{start_time.strftime('%m/%d %H:%M')} - {end_time.strftime('%H:%M')}"
+                            time_str = f"{start_time.strftime('%Y年%m月%d日 %H:%M')} - {end_time.strftime('%H:%M')}"
                         else:  # 全天行程
-                            time_str = f"{start_time.strftime('%m/%d')} (全天)"
+                            time_str = f"{start_time.strftime('%Y年%m月%d日')} (全天)"
                         
                         message += f"⏰ {time_str}\n"
                         message += f"📝 {event['summary']}\n"
