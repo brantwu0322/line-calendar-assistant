@@ -44,6 +44,9 @@ from flask_session import Session
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from googleapiclient.errors import HttpError
+from linebot import LineBotApi
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage, TextMessageContent
 
 # 設定日誌
 logging.basicConfig(
@@ -63,7 +66,7 @@ logger.info(f"Database path: {DB_PATH}")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['WTF_CSRF_ENABLED'] = False
 csrf = CSRFProtect(app)
@@ -334,13 +337,15 @@ def create_order(conn, line_user_id, amount):
 @with_db_connection
 def verify_admin(conn, username, password):
     """驗證管理員帳號密碼"""
-    c = conn.cursor()
-    c.execute('SELECT password FROM admins WHERE username = ?', (username,))
-    result = c.fetchone()
+    cursor = conn.cursor()
+    cursor.execute('SELECT password FROM admins WHERE username = ?', (username,))
+    result = cursor.fetchone()
     
-    if result:
-        return check_password_hash(result[0], password)
-    return False
+    if result is None:
+        return False
+    
+    stored_password = result[0]
+    return check_password_hash(stored_password, password)
 
 @with_db_connection
 def get_all_users(conn, search_term=None):
@@ -1219,6 +1224,108 @@ def handle_event_query(user_id, text, reply_token):
         logger.error(f"查詢行程時發生錯誤: {str(e)}")
         send_line_message(reply_token, "查詢行程時發生錯誤，請稍後再試。")
         return
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if verify_admin(username, password):
+            session['admin_logged_in'] = True
+            return redirect(url_for('admin_dashboard'))
+        else:
+            flash('帳號或密碼錯誤')
+            return redirect(url_for('admin_login'))
+    
+    return render_template('admin_login.html')
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    
+    users = get_all_users()
+    return render_template('admin_dashboard.html', users=users)
+
+@app.route('/oauth2callback')
+def oauth2callback():
+    """處理 Google OAuth 回調"""
+    try:
+        # 獲取授權碼和狀態
+        code = request.args.get('code')
+        state = request.args.get('state')
+        
+        if not code or not state:
+            return "授權失敗：缺少必要的參數", 400
+        
+        # 從狀態中獲取用戶 ID
+        line_user_id = state
+        
+        # 獲取應用程式 URL
+        app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
+        if not app_url.startswith('https://'):
+            app_url = f"https://{app_url.replace('http://', '')}"
+        redirect_uri = f"{app_url}/oauth2callback"
+        
+        # 載入客戶端憑證
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
+        if not credentials_json:
+            return "未設定 GOOGLE_CREDENTIALS 環境變數", 500
+            
+        try:
+            credentials_info = json.loads(credentials_json)
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+                json.dump(credentials_info, temp_file)
+                temp_file_path = temp_file.name
+            
+            # 建立 OAuth 流程
+            flow = Flow.from_client_secrets_file(
+                temp_file_path,
+                SCOPES,
+                redirect_uri=redirect_uri
+            )
+            os.unlink(temp_file_path)
+            
+            # 交換授權碼
+            flow.fetch_token(code=code)
+            credentials = flow.credentials
+            
+            # 儲存用戶憑證
+            save_user_credentials(line_user_id, credentials)
+            
+            # 使用 OAuth2 userinfo endpoint 獲取用戶資訊
+            userinfo_url = "https://www.googleapis.com/oauth2/v3/userinfo"
+            headers = {'Authorization': f'Bearer {credentials.token}'}
+            response = requests.get(userinfo_url, headers=headers)
+            
+            if response.status_code == 200:
+                user_info = response.json()
+                email = user_info.get('email')
+                
+                if email:
+                    # 更新用戶的 Google 電子郵件
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('UPDATE users SET google_email = ? WHERE line_user_id = ?', (email, line_user_id))
+                    conn.commit()
+                    conn.close()
+                    
+                    return render_template('oauth_success.html')
+                else:
+                    return "無法獲取用戶電子郵件", 500
+            else:
+                return "無法獲取用戶資訊", 500
+            
+        except json.JSONDecodeError:
+            return "GOOGLE_CREDENTIALS 環境變數格式錯誤", 500
+        except Exception as e:
+            logger.error(f"處理 OAuth 回調時發生錯誤：{str(e)}")
+            return f"授權失敗：{str(e)}", 500
+            
+    except Exception as e:
+        logger.error(f"OAuth 回調發生未預期錯誤：{str(e)}")
+        return f"系統錯誤：{str(e)}", 500
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
