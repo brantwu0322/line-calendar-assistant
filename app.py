@@ -800,6 +800,7 @@ def parse_date_query(text):
                     8. 如果用戶輸入「查詢下週X的行程」，保持原樣
                     9. 對於 X/Y 格式的日期，如果月份小於當前月份，則視為明年
                     10. 對於「下週X」格式，直接返回該格式，不需要轉換為具體日期
+                    11. 如果用戶輸入「查詢下週X的行程」，將 date_type 設為 "下週X"，不需要設定 start_date 和 end_date
                     
                     範例：
                     1. 輸入：「查詢行程」
@@ -1137,6 +1138,7 @@ def handle_message(event):
             except Exception as e:
                 logger.error(f"查詢行程時發生錯誤: {str(e)}")
                 send_line_message(reply_token, "查詢行程時發生錯誤，請稍後再試。")
+                return
                 
         # 修改行程
         elif text.startswith('修改行程'):
