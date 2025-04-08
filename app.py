@@ -574,7 +574,7 @@ def get_google_calendar_service(line_user_id=None):
                 )
                 os.unlink(temp_file_path)
                 
-                # 生成授權 URL
+                # 生成授權 URL，直接使用 line_user_id 作為 state
                 authorization_url, _ = flow.authorization_url(
                     access_type='offline',
                     include_granted_scopes='true',
@@ -1336,13 +1336,8 @@ def oauth2callback(conn):
         if not code:
             return "未收到授權碼", 400
             
-        # 從 state 參數中獲取 LINE 用戶 ID
-        try:
-            state_data = json.loads(state)
-            line_user_id = state_data.get('line_user_id')
-        except:
-            return "無效的 state 參數", 400
-            
+        # 直接使用 state 作為 LINE 用戶 ID
+        line_user_id = state
         if not line_user_id:
             return "無法識別用戶", 400
             
@@ -1352,9 +1347,14 @@ def oauth2callback(conn):
             return "未設定 Google 憑證", 500
             
         try:
+            credentials_info = json.loads(credentials_json)
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+                json.dump(credentials_info, temp_file)
+                temp_file_path = temp_file.name
+            
             # 建立 OAuth 流程
             flow = Flow.from_client_secrets_file(
-                CLIENT_SECRETS_FILE,
+                temp_file_path,
                 SCOPES,
                 redirect_uri=url_for('oauth2callback', _external=True)
             )
@@ -1395,11 +1395,13 @@ def oauth2callback(conn):
             
         except Exception as e:
             logger.error(f"處理 OAuth 回調時發生錯誤：{str(e)}")
+            logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
             conn.rollback()
             return f"授權失敗：{str(e)}", 500
             
     except Exception as e:
         logger.error(f"OAuth 回調發生未預期錯誤：{str(e)}")
+        logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
         return f"系統錯誤：{str(e)}", 500
 
 @with_db_connection
