@@ -1732,6 +1732,108 @@ def delete_user(conn, line_user_id):
         conn.rollback()
         return False
 
+def format_event_time(start_time, end_time):
+    """格式化行程時間"""
+    start = datetime.fromisoformat(start_time.replace('Z', '+00:00')).astimezone(pytz.timezone('Asia/Taipei'))
+    end = datetime.fromisoformat(end_time.replace('Z', '+00:00')).astimezone(pytz.timezone('Asia/Taipei'))
+    
+    date_str = start.strftime('%Y-%m-%d')
+    time_str = f"{start.strftime('%H:%M')} - {end.strftime('%H:%M')}"
+    return date_str, time_str
+
+def format_events_message(events):
+    """格式化行程列表訊息"""
+    if not events:
+        return "當天沒有行程"
+    
+    current_date = None
+    message = ""
+    
+    for event in events:
+        start = event.get('start', {}).get('dateTime', event.get('start', {}).get('date'))
+        end = event.get('end', {}).get('dateTime', event.get('end', {}).get('date'))
+        
+        date_str, time_str = format_event_time(start, end)
+        
+        if current_date != date_str:
+            current_date = date_str
+            message += f"\n📅 {date_str}\n"
+        
+        message += f"⏰ {time_str}\n"
+        message += f"📝 {event.get('summary', '(無標題)')}\n"
+        if event.get('description'):
+            message += f"📋 {event.get('description')}\n"
+        message += "\n"
+    
+    return message.strip()
+
+def handle_event_query(service, query_text):
+    """處理行程查詢"""
+    try:
+        # 解析查詢文字
+        target_date = parse_date_query(query_text)
+        if not target_date:
+            return "無法理解日期格式，請使用類似「查詢明天的行程」的格式"
+        
+        # 設定時間範圍
+        time_min = datetime.combine(target_date, datetime_time.min).astimezone(pytz.UTC).isoformat()
+        time_max = datetime.combine(target_date, datetime_time.max).astimezone(pytz.UTC).isoformat()
+        
+        # 查詢行程
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        events = events_result.get('items', [])
+        
+        return format_events_message(events)
+        
+    except Exception as e:
+        logger.error(f"查詢行程時發生錯誤: {str(e)}")
+        return "查詢行程時發生錯誤，請稍後再試"
+
+def handle_event_creation(service, text):
+    """處理新增行程"""
+    try:
+        # 解析日期時間和摘要
+        event_datetime, summary, is_all_day = parse_datetime_and_summary(text)
+        if not event_datetime or not summary:
+            return "無法理解時間或內容，請使用類似「明天下午三點開會」的格式"
+        
+        # 設定結束時間（預設一小時）
+        end_datetime = event_datetime + timedelta(hours=1)
+        
+        # 建立行程
+        event = {
+            'summary': summary,
+            'start': {
+                'dateTime': event_datetime.isoformat(),
+                'timeZone': 'Asia/Taipei',
+            },
+            'end': {
+                'dateTime': end_datetime.isoformat(),
+                'timeZone': 'Asia/Taipei',
+            },
+        }
+        
+        event = service.events().insert(calendarId='primary', body=event).execute()
+        
+        # 格式化回應訊息
+        date_str, time_str = format_event_time(event['start']['dateTime'], event['end']['dateTime'])
+        message = f"已新增行程：\n"
+        message += f"📅 {date_str}\n"
+        message += f"⏰ {time_str}\n"
+        message += f"📝 {event['summary']}\n"
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"新增行程時發生錯誤: {str(e)}")
+        return "新增行程時發生錯誤，請稍後再試"
+
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
     logger.info(f"LINE_CHANNEL_ACCESS_TOKEN: {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')[:10]}...")
