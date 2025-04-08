@@ -184,6 +184,9 @@ CLIENT_SECRETS_FILE = 'client_secrets.json'
 # 初始化簡體轉繁體轉換器
 converter = opencc.OpenCC('s2twp')
 
+# 設定 OAuth 重定向 URI
+OAUTH_REDIRECT_URI = 'https://line-calendar-assistant.onrender.com/oauth2callback'
+
 def with_db_connection(func):
     """資料庫連接裝飾器"""
     @wraps(func)
@@ -558,15 +561,13 @@ def get_google_calendar_service(line_user_id=None):
                     json.dump(credentials_info, temp_file)
                     temp_file_path = temp_file.name
                 
-                # 使用固定的重定向 URI
-                redirect_uri = 'https://line-calendar-assistant.onrender.com/oauth2callback'
-                logger.info(f"使用重定向 URI: {redirect_uri}")
+                logger.info(f"使用重定向 URI: {OAUTH_REDIRECT_URI}")
                 
                 # 設定 OAuth 2.0 流程
                 flow = Flow.from_client_secrets_file(
                     temp_file_path,
                     SCOPES,
-                    redirect_uri=redirect_uri
+                    redirect_uri=OAUTH_REDIRECT_URI
                 )
                 os.unlink(temp_file_path)
                 
@@ -1348,14 +1349,11 @@ def oauth2callback(conn):
                 json.dump(credentials_info, temp_file)
                 temp_file_path = temp_file.name
             
-            # 使用固定的重定向 URI
-            redirect_uri = 'https://line-calendar-assistant.onrender.com/oauth2callback'
-            
             # 建立 OAuth 流程
             flow = Flow.from_client_secrets_file(
                 temp_file_path,
                 SCOPES,
-                redirect_uri=redirect_uri
+                redirect_uri=OAUTH_REDIRECT_URI
             )
             os.unlink(temp_file_path)
             
