@@ -5,9 +5,19 @@ import openai
 from openai import OpenAI
 from datetime import datetime, timedelta
 from flask import Flask, request, abort
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.v3 import WebhookHandler
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    ReplyMessageRequest,
+    TextMessage
+)
+from linebot.v3.webhooks import (
+    MessageEvent,
+    TextMessageContent
+)
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -31,7 +41,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 初始化 LINE Bot
-line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
+configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
 # 初始化 OpenAI
@@ -386,10 +396,10 @@ def handle_authorization_request(user_id):
     try:
         # 建立授權流程
         flow = InstalledAppFlow.from_client_secrets_file(
-            'credentials.json',
+            os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json'),
             ['https://www.googleapis.com/auth/calendar']
         )
-        flow.redirect_uri = 'https://line-calendar-assistant.onrender.com/oauth2callback'
+        flow.redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', 'https://line-calendar-assistant.onrender.com/oauth2callback')
         
         # 產生授權 URL
         auth_url, _ = flow.authorization_url(prompt='consent')
@@ -456,10 +466,14 @@ def oauth2callback():
             connection.commit()
             
             # 通知用戶
-            line_bot_api.push_message(
-                user_id,
-                TextSendMessage(text="Google 日曆授權成功！")
-            )
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=result['line_user_id'],
+                        messages=[TextMessage(text="Google 日曆授權成功！")]
+                    )
+                )
             
             return "授權成功！您可以關閉此視窗。"
         finally:
@@ -481,7 +495,7 @@ def callback():
     
     return 'OK'
 
-@handler.add(MessageEvent, message=TextMessage)
+@handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     try:
         # 取得用戶 ID
@@ -490,83 +504,101 @@ def handle_message(event):
         # 取得訊息內容
         text = event.message.text
         
-        # 檢查是否需要授權
-        if text == '授權':
-            if not is_authorized(user_id):
-                # 建立授權 URL
-                auth_url = create_authorization_url(user_id)
-                # 回傳授權 URL 給用戶
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text=f'請點擊以下連結進行授權：\n{auth_url}')
-                )
-            else:
-                # 如果已經授權，提示用戶
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text='您已經完成授權，不需要再次授權。')
-                )
-            return
-        
-        # 處理查詢行程
-        if any(keyword in text for keyword in ['查詢行程', '查看行程', '我的行程']) or '的行程' in text:
-            response = handle_event_query(user_id, text)
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=response)
-            )
-            return
-        
-        # 處理修改行程
-        if any(keyword in text for keyword in ['修改行程', '更改行程', '更新行程']):
-            response = handle_event_modification(user_id, text)
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=response)
-            )
-            return
-        
-        # 處理刪除行程
-        if any(keyword in text for keyword in ['刪除行程', '移除行程', '取消行程']):
-            response = handle_event_deletion(user_id, text)
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=response)
-            )
-            return
-        
-        # 處理新增行程
-        if any(keyword in text for keyword in ['新增行程', '加入行程', '建立行程']):
-            response = handle_event_addition(user_id, text)
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=response)
-            )
-            return
-        
-        # 處理取消授權
-        if any(keyword in text for keyword in ['取消授權', '解除綁定', '斷開連結']):
-            connection = get_db_connection()
-            if connection:
-                try:
-                    cursor = connection.cursor()
-                    cursor.execute(
-                        "UPDATE users SET google_credentials = NULL WHERE line_user_id = %s",
-                        (user_id,)
-                    )
-                    connection.commit()
-                    line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text="已取消 Google 日曆授權")
-                    )
-                finally:
-                    connection.close()
-            return
-        
-        # 處理幫助訊息
-        if any(keyword in text for keyword in ['幫助', '說明', '功能']):
-            help_text = """📅 LINE 日曆助手使用說明：
+        # 建立 MessagingApi 實例
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
             
+            # 檢查是否需要授權
+            if text == '授權':
+                if not is_authorized(user_id):
+                    # 建立授權 URL
+                    auth_url = create_authorization_url(user_id)
+                    # 回傳授權 URL 給用戶
+                    line_bot_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text=f'請點擊以下連結進行授權：\n{auth_url}')]
+                        )
+                    )
+                else:
+                    # 如果已經授權，提示用戶
+                    line_bot_api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text='您已經完成授權，不需要再次授權。')]
+                        )
+                    )
+                return
+            
+            # 處理查詢行程
+            if any(keyword in text for keyword in ['查詢行程', '查看行程', '我的行程']) or '的行程' in text:
+                response = handle_event_query(user_id, text)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=response)]
+                    )
+                )
+                return
+            
+            # 處理修改行程
+            if any(keyword in text for keyword in ['修改行程', '更改行程', '更新行程']):
+                response = handle_event_modification(user_id, text)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=response)]
+                    )
+                )
+                return
+            
+            # 處理刪除行程
+            if any(keyword in text for keyword in ['刪除行程', '移除行程', '取消行程']):
+                response = handle_event_deletion(user_id, text)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=response)]
+                    )
+                )
+                return
+            
+            # 處理新增行程
+            if any(keyword in text for keyword in ['新增行程', '加入行程', '建立行程']):
+                response = handle_event_addition(user_id, text)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=response)]
+                    )
+                )
+                return
+            
+            # 處理取消授權
+            if any(keyword in text for keyword in ['取消授權', '解除綁定', '斷開連結']):
+                connection = get_db_connection()
+                if connection:
+                    try:
+                        cursor = connection.cursor()
+                        cursor.execute(
+                            "UPDATE users SET google_credentials = NULL WHERE line_user_id = %s",
+                            (user_id,)
+                        )
+                        connection.commit()
+                        line_bot_api.reply_message(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text="已取消 Google 日曆授權")]
+                            )
+                        )
+                    finally:
+                        connection.close()
+                return
+            
+            # 處理幫助訊息
+            if any(keyword in text for keyword in ['幫助', '說明', '功能']):
+                help_text = """📅 LINE 日曆助手使用說明：
+                
 1. 查詢行程
    - 格式：查詢 X/Y 的行程（如：查詢 4/9 的行程）
    - 格式：查詢週X的行程（如：查詢週五的行程）
@@ -587,24 +619,32 @@ def handle_message(event):
 5. 授權相關
    - 輸入「授權」開始 Google 日曆授權流程
    - 輸入「取消授權」解除 Google 日曆綁定"""
+                
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=help_text)]
+                    )
+                )
+                return
             
+            # 預設回應
             line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=help_text)
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text="請輸入「幫助」查看使用說明")]
+                )
             )
-            return
-        
-        # 預設回應
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="請輸入「幫助」查看使用說明")
-        )
     except Exception as e:
         logger.error(f"處理訊息時發生錯誤: {e}")
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="處理訊息時發生錯誤，請稍後再試")
-        )
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text="處理訊息時發生錯誤，請稍後再試")]
+                )
+            )
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
