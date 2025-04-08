@@ -12,6 +12,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            font-family: 'Microsoft JhengHei', sans-serif;
         }
         .error-container {
             background: white;
@@ -27,6 +28,9 @@
             font-size: 4rem;
             margin-bottom: 1rem;
         }
+        .btn-back {
+            margin-top: 1rem;
+        }
     </style>
 </head>
 <body>
@@ -35,7 +39,11 @@
         <h2 class="mb-4">發生錯誤</h2>
         <p class="mb-4">{{ error }}</p>
         <p class="text-muted">請稍後再試或聯繫系統管理員。</p>
-        <a href="javascript:history.back()" class="btn btn-primary mt-3">返回上一頁</a>
+        <div class="btn-back">
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-primary">返回儀表板</a>
+            <a href="{{ url_for('admin_logout') }}" class="btn btn-outline-secondary">登出</a>
+        </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html> 
