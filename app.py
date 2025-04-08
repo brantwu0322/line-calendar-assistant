@@ -51,10 +51,19 @@ openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 # 初始化 Flask 應用
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev')
 
 # 設定時區
 tz = pytz.timezone('Asia/Taipei')
+
+# 管理員驗證裝飾器
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'admin_id' not in session:
+            return redirect(url_for('admin_login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # 初始化資料庫
 def init_db():
@@ -843,15 +852,6 @@ def delete_admin(username):
 def admin_logout():
     session.pop('admin_id', None)
     return redirect(url_for('admin_login'))
-
-# 管理員權限檢查裝飾器
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'admin_id' not in session:
-            return redirect(url_for('admin_login'))
-        return f(*args, **kwargs)
-    return decorated_function
 
 @app.route('/admin/query_user/<line_user_id>')
 @admin_required
