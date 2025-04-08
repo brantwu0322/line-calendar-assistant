@@ -558,12 +558,8 @@ def get_google_calendar_service(line_user_id=None):
                     json.dump(credentials_info, temp_file)
                     temp_file_path = temp_file.name
                 
-                # 確保使用 HTTPS
-                app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
-                if not app_url.startswith('https://'):
-                    app_url = f"https://{app_url.replace('http://', '')}"
-                redirect_uri = f"{app_url}/oauth2callback"
-                
+                # 使用固定的重定向 URI
+                redirect_uri = 'https://line-calendar-assistant.onrender.com/oauth2callback'
                 logger.info(f"使用重定向 URI: {redirect_uri}")
                 
                 # 設定 OAuth 2.0 流程
@@ -1352,12 +1348,16 @@ def oauth2callback(conn):
                 json.dump(credentials_info, temp_file)
                 temp_file_path = temp_file.name
             
+            # 使用固定的重定向 URI
+            redirect_uri = 'https://line-calendar-assistant.onrender.com/oauth2callback'
+            
             # 建立 OAuth 流程
             flow = Flow.from_client_secrets_file(
                 temp_file_path,
                 SCOPES,
-                redirect_uri=url_for('oauth2callback', _external=True)
+                redirect_uri=redirect_uri
             )
+            os.unlink(temp_file_path)
             
             # 交換授權碼獲取憑證
             flow.fetch_token(code=code)
