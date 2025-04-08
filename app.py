@@ -796,6 +796,8 @@ def parse_date_query(text):
                     4. 日期格式統一使用 YYYY-MM-DD
                     5. 對於 X/Y 格式的日期（如 4/9），將其轉換為 "X月Y日" 格式
                     6. 對於「下週X」格式，保持原樣
+                    7. 如果用戶輸入「查詢 X/Y 的行程」，將其轉換為「查詢 X月Y日 的行程」
+                    8. 如果用戶輸入「查詢下週X的行程」，保持原樣
                     
                     範例：
                     1. 輸入：「查詢行程」
@@ -1570,7 +1572,7 @@ def handle_audio_message(event):
         # 下載音訊檔案
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-            response = line_bot_api.get_message_content_v2_message_id_get(
+            response = line_bot_api.get_message_content(
                 message_id=event.message.id
             )
             
