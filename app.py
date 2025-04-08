@@ -1013,508 +1013,99 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    """處理文字訊息"""
+    """處理 LINE 訊息"""
     try:
         user_id = event.source.user_id
         text = event.message.text.strip()
+        
         logger.info(f"收到來自用戶 {user_id} 的訊息: {text}")
         
-        # 檢查是否需要重新授權
+        # 檢查授權狀態
         if not check_google_auth(user_id):
-            return "請先進行 Google 日曆授權：\n1. 點擊以下連結進行授權\n2. 授權完成後，系統會自動處理您的請求\n\n授權連結：\n" + get_auth_url(user_id)
+            auth_url = get_auth_url(user_id)
+            if auth_url:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text=f"請先授權 Google 日曆：\n{auth_url}\n\n授權完成後，請點擊「完成授權」按鈕。"
+                    )
+                )
+            else:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="無法生成授權 URL，請稍後再試。")
+                )
+            return
         
-        # 處理行程查詢
+        # 處理查詢行程
         if any(keyword in text for keyword in ['查詢行程', '查看行程', '我的行程']) or '的行程' in text:
-            logger.info("處理行程查詢請求")
-            return handle_event_query(text, user_id)
-        
-        # 處理行程修改
-        elif "修改" in text and ("的行程" in text or "個行程" in text):
-            logger.info("處理行程修改請求")
-            return handle_event_modification(text, user_id)
-        
-        # 處理行程刪除
-        elif "刪除" in text and ("的行程" in text or "個行程" in text):
-            logger.info("處理行程刪除請求")
-            return handle_event_deletion(text, user_id)
-        
-        # 處理行程新增
-        elif any(keyword in text for keyword in ['新增行程', '加入行程', '添加行程']):
-            logger.info("處理行程新增請求")
-            return handle_event_creation(text, user_id)
-        
-        # 處理授權相關請求
-        elif text == "授權":
-            logger.info("處理授權請求")
-            return "請點擊以下連結進行 Google 日曆授權：\n" + get_auth_url(user_id)
-        
-        # 處理取消授權
-        elif text == "取消授權":
-            logger.info("處理取消授權請求")
-            return handle_revoke_auth(user_id)
-        
-        # 處理說明請求
-        elif text == "說明":
-            logger.info("處理說明請求")
-            return get_help_message()
-        
-        # 處理未知指令
-        else:
-            logger.info("收到未知指令")
-            return "抱歉，我不理解您的指令。請輸入「說明」查看可用指令。"
+            handle_event_query(event)
+            return
             
+        # 處理修改行程
+        if any(keyword in text for keyword in ['修改行程', '更改行程', '更新行程']):
+            handle_event_modification(event)
+            return
+            
+        # 處理刪除行程
+        if any(keyword in text for keyword in ['刪除行程', '取消行程', '移除行程']):
+            handle_event_deletion(event)
+            return
+            
+        # 處理新增行程
+        if any(keyword in text for keyword in ['新增行程', '加入行程', '建立行程']) or '開會' in text or '會議' in text:
+            handle_event_creation(event)
+            return
+            
+        # 處理授權請求
+        if text == '授權':
+            auth_url = get_auth_url(user_id)
+            if auth_url:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text=f"請點擊以下連結進行授權：\n{auth_url}\n\n授權完成後，請點擊「完成授權」按鈕。"
+                    )
+                )
+            else:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="無法生成授權 URL，請稍後再試。")
+                )
+            return
+            
+        # 處理取消授權
+        if text == '取消授權':
+            handle_revoke_auth(event)
+            return
+            
+        # 處理說明
+        if text == '說明':
+            handle_help(event)
+            return
+            
+        # 處理未知指令
+        logger.info("收到未知指令")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="抱歉，我不明白您的指令。\n\n"
+                     "您可以：\n"
+                     "1. 輸入「說明」查看使用方式\n"
+                     "2. 輸入「授權」進行 Google 日曆授權\n"
+                     "3. 直接輸入行程內容，例如：\n"
+                     "   - 明天早上九點開會預計45分鐘\n"
+                     "   - 下週三下午兩點與客戶開會\n"
+                     "   - 4/15 下午三點團隊會議"
+            )
+        )
+        
     except Exception as e:
         logger.error(f"處理訊息時發生錯誤: {str(e)}")
-        return "處理您的請求時發生錯誤，請稍後再試。"
-
-def handle_event_query(text, user_id):
-    """處理行程查詢請求"""
-    try:
-        # 解析日期查詢
-        date_result = parse_date_query(text)
-        if not date_result:
-            return "無法解析日期，請確認格式是否正確。"
-        
-        start_date, end_date, is_range = date_result
-        
-        # 獲取行程
-        events = get_events(user_id, start_date, end_date)
-        if not events:
-            if is_range:
-                return f"{start_date.strftime('%Y年%m月%d日')} 到 {end_date.strftime('%Y年%m月%d日')} 沒有行程安排。"
-            else:
-                return f"{start_date.strftime('%Y年%m月%d日')} 沒有行程安排。"
-        
-        # 格式化行程訊息
-        if is_range:
-            message = f'📅 {start_date.strftime("%Y年%m月%d日")} 到 {end_date.strftime("%Y年%m月%d日")} 的行程：\n\n'
-        else:
-            message = f'📅 {start_date.strftime("%Y年%m月%d日")} 的行程：\n\n'
-            
-        for event in events:
-            message += f"⏰ {event['start_time']} - {event['end_time']}\n"
-            message += f"📝 {event['summary']}\n"
-            if event.get('description'):
-                message += f"📋 {event['description']}\n"
-            if event.get('location'):
-                message += f"📍 {event['location']}\n"
-            message += "─" * 13 + "\n"
-        
-        return message
-    except Exception as e:
-        logger.error(f"查詢行程時發生錯誤: {str(e)}")
-        return "查詢行程時發生錯誤，請稍後再試。"
-
-@app.route('/authorize/<line_user_id>')
-@with_error_handling
-def authorize(line_user_id):
-    """處理 Google Calendar 授權"""
-    try:
-        # 檢查是否是行動瀏覽器
-        user_agent = request.headers.get('User-Agent', '').lower()
-        is_mobile_browser = 'mobile' in user_agent and ('safari' in user_agent or 'chrome' in user_agent)
-        
-        if not is_mobile_browser:
-            return render_template('browser_notice.html')
-
-        # 從環境變數獲取憑證
-        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
-        if not credentials_json:
-            logger.error("GOOGLE_CREDENTIALS not found in environment variables")
-            return render_template('error.html', error="系統設定錯誤，請聯繫管理員"), 500
-
-        # 創建臨時憑證文件
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-            json.dump(json.loads(credentials_json), temp_file)
-            temp_file_path = temp_file.name
-
-        try:
-            # 確保使用 HTTPS
-            app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
-            if not app_url.startswith('https://'):
-                app_url = f"https://{app_url.replace('http://', '')}"
-            redirect_uri = f"{app_url}/oauth2callback"
-            
-            logger.info(f"授權使用重定向 URI: {redirect_uri}")
-            
-            flow = Flow.from_client_secrets_file(
-                temp_file_path,
-                SCOPES,
-                redirect_uri=redirect_uri
-            )
-            
-            # 生成授權 URL，加入額外參數
-            authorization_url, _ = flow.authorization_url(
-                access_type='offline',
-                include_granted_scopes='true',
-                state=line_user_id,
-                prompt='consent',  # 強制顯示同意畫面
-                login_hint='',  # 允許用戶選擇帳號
-                openid_realm=app_url  # 設定 OpenID realm
-            )
-            
-            logger.info(f"生成授權 URL: {authorization_url}")
-            return redirect(authorization_url)
-        
-        except Exception as e:
-            logger.error(f"OAuth flow error: {str(e)}")
-            return render_template('error.html', error=f"授權過程發生錯誤：{str(e)}"), 500
-        
-        finally:
-            # 清理臨時文件
-            if os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
-                logger.info(f"Cleaned up temporary file: {temp_file_path}")
-    
-    except Exception as e:
-        logger.error(f"Unexpected error in authorize: {str(e)}")
-        return render_template('error.html', error=f"系統錯誤：{str(e)}"), 500
-
-@with_db_connection
-def create_or_update_user(conn, line_user_id, google_email, credentials_json):
-    """創建或更新用戶資料"""
-    try:
-        c = conn.cursor()
-        # 檢查用戶是否存在
-        c.execute('SELECT 1 FROM users WHERE line_user_id = ?', (line_user_id,))
-        user_exists = c.fetchone() is not None
-        
-        if user_exists:
-            # 更新現有用戶
-            c.execute('''
-                UPDATE users 
-                SET google_email = ?, google_credentials = ?
-                WHERE line_user_id = ?
-            ''', (google_email, credentials_json, line_user_id))
-            logger.info(f"更新用戶資料：{line_user_id}")
-        else:
-            # 創建新用戶
-            c.execute('''
-                INSERT INTO users 
-                (line_user_id, google_email, google_credentials, subscription_status, subscription_end_date)
-                VALUES (?, ?, ?, 'free', NULL)
-            ''', (line_user_id, google_email, credentials_json))
-            logger.info(f"創建新用戶：{line_user_id}")
-        
-        conn.commit()
-        return True
-    except Exception as e:
-        logger.error(f"創建或更新用戶時發生錯誤：{str(e)}")
-        conn.rollback()
-        return False
-
-@app.route('/oauth2callback')
-@with_error_handling
-def oauth2callback():
-    """處理 OAuth2 回調"""
-    try:
-        # 從 state 參數中獲取 line_user_id
-        line_user_id = request.args.get('state')
-        if not line_user_id:
-            logger.error("Missing line_user_id in state parameter")
-            return render_template('error.html', error="授權過程發生錯誤：缺少用戶識別資訊"), 400
-
-        # 從環境變數獲取憑證
-        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
-        if not credentials_json:
-            logger.error("GOOGLE_CREDENTIALS not found in environment variables")
-            return render_template('error.html', error="系統設定錯誤，請聯繫管理員"), 500
-
-        # 創建臨時憑證文件
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-            json.dump(json.loads(credentials_json), temp_file)
-            temp_file_path = temp_file.name
-
-        try:
-            # 確保使用 HTTPS
-            app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
-            if not app_url.startswith('https://'):
-                app_url = f"https://{app_url.replace('http://', '')}"
-            redirect_uri = f"{app_url}/oauth2callback"
-            
-            logger.info(f"回調使用重定向 URI: {redirect_uri}")
-            
-            # 設定 OAuth 2.0 流程
-            flow = Flow.from_client_secrets_file(
-                temp_file_path,
-                SCOPES,
-                redirect_uri=redirect_uri
-            )
-            
-            # 確保回調 URL 使用 HTTPS
-            callback_url = request.url
-            if callback_url.startswith('http://'):
-                callback_url = f"https://{callback_url[7:]}"
-            logger.info(f"處理回調 URL: {callback_url}")
-            
-            # 獲取授權碼
-            flow.fetch_token(authorization_response=callback_url)
-            
-            credentials = flow.credentials
-            
-            # 獲取用戶 email
-            service = build('oauth2', 'v2', credentials=credentials)
-            user_info = service.userinfo().get().execute()
-            user_email = user_info.get('email')
-            logger.info(f"獲取到用戶 email: {user_email}")
-            
-            # 準備憑證 JSON
-            credentials_dict = {
-                'token': credentials.token,
-                'refresh_token': credentials.refresh_token,
-                'token_uri': credentials.token_uri,
-                'client_id': credentials.client_id,
-                'client_secret': credentials.client_secret,
-                'scopes': credentials.scopes
-            }
-            
-            # 創建或更新用戶資料
-            if create_or_update_user(line_user_id, user_email, json.dumps(credentials_dict)):
-                logger.info(f"Successfully authorized user: {line_user_id} with email: {user_email}")
-                return render_template('success.html', message="授權成功！請回到 LINE 繼續使用。")
-            else:
-                return render_template('error.html', error="儲存用戶資料時發生錯誤"), 500
-        
-        except Exception as e:
-            logger.error(f"OAuth callback error: {str(e)}")
-            logger.error(f"Request URL: {request.url}")
-            return render_template('error.html', error=f"授權過程發生錯誤：{str(e)}"), 500
-        
-        finally:
-            # 清理臨時文件
-            if os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
-                logger.info(f"Cleaned up temporary file: {temp_file_path}")
-    
-    except Exception as e:
-        logger.error(f"Unexpected error in oauth2callback: {str(e)}")
-        return render_template('error.html', error=f"系統錯誤：{str(e)}"), 500
-
-@app.route('/admin/login', methods=['GET', 'POST'])
-@with_error_handling
-def admin_login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        if not username or not password:
-            flash('請輸入帳號和密碼')
-            return render_template('admin_login.html')
-        
-        if verify_admin(username, password):
-            session['admin_logged_in'] = True
-            session['admin_username'] = username
-            logger.info(f'管理員 {username} 登入成功')
-            return redirect(url_for('admin_dashboard'))
-        else:
-            logger.warning(f'管理員登入失敗: {username}')
-            flash('帳號或密碼錯誤')
-    
-    return render_template('admin_login.html')
-
-@app.route('/admin/dashboard')
-@with_error_handling
-def admin_dashboard():
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    
-    # 獲取搜尋關鍵字
-    search_term = request.args.get('search', '')
-    
-    # 獲取使用者資料
-    users = get_all_users(search_term=search_term)
-    logger.info(f'成功獲取 {len(users)} 位使用者資料')
-    return render_template('admin_dashboard.html', 
-                         users=users,
-                         admin_username=session.get('admin_username'),
-                         search_term=search_term)
-
-@app.route('/admin/logout')
-@with_error_handling
-def admin_logout():
-    """管理員登出"""
-    session.pop('admin_logged_in', None)
-    session.pop('admin_username', None)
-    flash('已成功登出')
-    return redirect(url_for('admin_login'))
-
-@app.route('/admin/change_password', methods=['POST'])
-@with_error_handling
-def change_admin_password():
-    """修改管理員密碼"""
-    if not session.get('admin_logged_in'):
-        return redirect(url_for('admin_login'))
-    
-    current_password = request.form.get('current_password')
-    new_password = request.form.get('new_password')
-    confirm_password = request.form.get('confirm_password')
-    
-    if not all([current_password, new_password, confirm_password]):
-        flash('請填寫所有密碼欄位')
-        return redirect(url_for('admin_dashboard'))
-    
-    if new_password != confirm_password:
-        flash('新密碼與確認密碼不符')
-        return redirect(url_for('admin_dashboard'))
-    
-    # 驗證當前密碼
-    username = session.get('admin_username')
-    if not verify_admin(username, current_password):
-        flash('當前密碼錯誤')
-        return redirect(url_for('admin_dashboard'))
-    
-    # 更新密碼
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        new_password_hash = generate_password_hash(new_password)
-        c.execute('UPDATE admins SET password = ? WHERE username = ?',
-                 (new_password_hash, username))
-        conn.commit()
-        flash('密碼已成功更新')
-    except Exception as e:
-        logger.error(f'更新密碼時發生錯誤: {str(e)}')
-        flash('更新密碼失敗')
-    finally:
-        if 'conn' in locals():
-            conn.close()
-    
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/subscribe/<line_user_id>')
-@with_error_handling
-def subscribe(line_user_id):
-    """處理訂閱請求"""
-    # 這裡可以整合金流系統（如綠界、藍新等）
-    # 目前先模擬訂閱流程
-    order_id = create_order(line_user_id, 299)  # 假設月費 299 元
-    
-    if order_id:
-        # 這裡應該導向金流系統的付款頁面
-        # 目前先模擬付款成功
-        update_user_subscription(line_user_id, 'premium', 
-                               (datetime.now() + timedelta(days=30)).isoformat())
-        return "訂閱成功！請回到 LINE 繼續使用。"
-    return "訂閱失敗，請稍後再試。"
-
-@app.route('/admin/delete_user/<line_user_id>', methods=['POST'])
-@with_error_handling
-def admin_delete_user(line_user_id):
-    """管理員刪除使用者"""
-    if not session.get('admin_logged_in'):
-        return jsonify({'success': False, 'message': '請先登入'}), 401
-    
-    if delete_user(line_user_id):
-        return jsonify({'success': True, 'message': '使用者已成功刪除'})
-    else:
-        return jsonify({'success': False, 'message': '刪除使用者時發生錯誤'}), 500
-
-@app.errorhandler(404)
-@with_error_handling
-def page_not_found(e):
-    return render_template('error.html', error="找不到該頁面"), 404
-
-@app.errorhandler(500)
-@with_error_handling
-def internal_server_error(e):
-    return render_template('error.html', error="伺服器內部錯誤"), 500
-
-@handler.add(MessageEvent, message=AudioMessageContent)
-def handle_audio_message(event):
-    """處理語音訊息"""
-    temp_audio_path = None
-    wav_path = None
-    try:
-        # 下載音訊檔案
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            # 下載語音訊息
-            try:
-                response = line_bot_api.get_message_content(
-                    message_id=event.message.id
-                )
-            except Exception as e:
-                logging.error(f"下載語音訊息時發生錯誤：{str(e)}")
-                raise Exception("下載語音訊息失敗")
-
-        temp_audio_path = tempfile.mktemp(suffix='.m4a')
-        wav_path = tempfile.mktemp(suffix='.wav')
-
-        try:
-            with open(temp_audio_path, 'wb') as f:
-                f.write(response.content)
-            logging.info(f"成功下載音訊檔案，大小：{os.path.getsize(temp_audio_path)} bytes")
-        except Exception as e:
-            logging.error(f"下載音訊檔案時發生錯誤：{str(e)}")
-            raise Exception("下載音訊檔案失敗")
-
-        try:
-            # 使用 pydub 轉換音訊格式
-            audio = AudioSegment.from_file(temp_audio_path)
-            audio = audio.set_frame_rate(16000)
-            audio = audio.set_channels(1)
-            audio.export(wav_path, format="wav")
-            logging.info(f"成功轉換音訊格式：{wav_path}")
-        except Exception as e:
-            logging.error(f"轉換音訊格式時發生錯誤：{str(e)}")
-            raise Exception("轉換音訊格式失敗")
-
-        try:
-            # 使用 SpeechRecognition 進行語音識別
-            recognizer = sr.Recognizer()
-            with sr.AudioFile(wav_path) as source:
-                audio_data = recognizer.record(source)
-                text = recognizer.recognize_google(audio_data, language='zh-TW')
-                logging.info(f"成功識別語音內容：{text}")
-                # 將簡體中文轉換為繁體中文
-                text = converter.convert(text)
-                logging.info(f"成功識別語音內容（繁體）：{text}")
-        except sr.UnknownValueError:
-            logging.error("無法識別語音內容")
-            raise Exception("無法識別語音內容")
-            
-        # 解析文字內容
-        event_data = parse_event_text(text)
-        if not event_data:
-            send_line_message(event.reply_token, "抱歉，我無法理解您說的時間。請試著說得更清楚一些。")
-            return
-        
-        # 檢查用戶是否已授權
-        user_id = event.source.user_id
-        credentials = get_user_credentials(user_id)
-        if not credentials:
-            send_line_message(event.reply_token, "您尚未授權存取 Google 日曆。請先完成授權流程。")
-            return
-
-        # 建立 Google Calendar 事件
-        try:
-            service = build('calendar', 'v3', credentials=credentials)
-            event = service.events().insert(
-                calendarId='primary',
-                body=event_data
-            ).execute()
-            logging.info(f"成功建立事件：{event.get('htmlLink')}")
-            send_line_message(event.reply_token, f"已成功建立行程！\n\n📅 事件：{event_data['summary']}\n⏰ 時間：{event_data['start']['dateTime']} - {event_data['end']['dateTime']}\n\n您可以在 Google 日曆中查看詳細資訊。")
-        except HttpError as error:
-            logging.error(f"建立事件時發生錯誤：{str(error)}")
-            send_line_message(event.reply_token, f"抱歉，發生了一點問題：{str(error)}\n請稍後再試，或聯繫系統管理員協助 🙏")
-            return
-        else:
-            send_line_message(event.reply_token, "抱歉，我在建立行程時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
-            
-    except Exception as e:
-        logging.error(f"處理語音訊息時發生錯誤: {str(e)}")
-        logging.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
-        send_line_message(event.reply_token, "抱歉，我在處理您的語音訊息時遇到了一些問題 😅\n請稍後再試一次，或聯繫系統管理員協助。")
-    finally:
-        # 清理臨時文件
-        try:
-            if temp_audio_path and os.path.exists(temp_audio_path):
-                os.unlink(temp_audio_path)
-            if wav_path and os.path.exists(wav_path):
-                os.unlink(wav_path)
-        except Exception as e:
-            logging.error(f"清理臨時文件時發生錯誤: {str(e)}")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="處理您的請求時發生錯誤，請稍後再試。")
+        )
 
 @with_db_connection
 def save_event(conn, line_user_id, event_id, summary, start_time, end_time):
@@ -1770,6 +1361,255 @@ def get_auth_url(user_id):
     except Exception as e:
         logger.error(f"獲取授權 URL 時發生錯誤: {str(e)}")
         return None
+
+def handle_event_creation(event):
+    """處理新增行程的請求"""
+    try:
+        user_id = event.source.user_id
+        text = event.message.text.strip()
+        
+        # 解析行程內容
+        try:
+            # 使用 GPT-4 解析行程內容
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": """你是一個行程解析助手。請從用戶的訊息中提取以下資訊：
+1. 日期（例如：明天、下週三、4/15）
+2. 時間（例如：早上九點、下午兩點）
+3. 行程標題
+4. 行程持續時間（如果有的話）
+
+請以 JSON 格式返回，格式如下：
+{
+    "date": "日期",
+    "time": "時間",
+    "title": "行程標題",
+    "duration": "持續時間（分鐘）"
+}
+
+如果無法確定某個欄位，請設為 null。"""},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.3
+            )
+            
+            # 解析回應
+            try:
+                event_info = json.loads(response.choices[0].message.content)
+            except json.JSONDecodeError:
+                logger.error(f"無法解析 GPT-4 回應: {response.choices[0].message.content}")
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="無法解析行程內容，請確認格式是否正確。")
+                )
+                return
+                
+            # 檢查必要欄位
+            if not event_info.get('date') or not event_info.get('time'):
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="無法確定行程的日期和時間，請確認格式是否正確。")
+                )
+                return
+                
+            # 轉換日期和時間
+            try:
+                # 解析日期
+                if event_info['date'] == '明天':
+                    event_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                elif event_info['date'].startswith('下週'):
+                    weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
+                    target_weekday = weekday_map[event_info['date'][2]]
+                    current_weekday = datetime.now().weekday()
+                    days_ahead = (target_weekday - current_weekday) % 7
+                    days_ahead += 7  # 確保是下週
+                    event_date = (datetime.now() + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+                elif event_info['date'].startswith('週'):
+                    weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
+                    target_weekday = weekday_map[event_info['date'][1]]
+                    current_weekday = datetime.now().weekday()
+                    days_ahead = (target_weekday - current_weekday) % 7
+                    if days_ahead == 0:  # 如果是今天，顯示下週的日期
+                        days_ahead = 7
+                    event_date = (datetime.now() + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+                else:
+                    # 處理 X/Y 格式的日期
+                    try:
+                        month, day = map(int, event_info['date'].split('/'))
+                        current_year = datetime.now().year
+                        event_date = datetime(current_year, month, day).strftime('%Y-%m-%d')
+                    except:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            TextSendMessage(text="無法解析日期格式，請使用「明天」、「下週X」或「X/Y」的格式。")
+                        )
+                        return
+                        
+                # 解析時間
+                time_str = event_info['time']
+                if '早上' in time_str:
+                    hour = int(time_str.replace('早上', '').replace('點', ''))
+                elif '下午' in time_str:
+                    hour = int(time_str.replace('下午', '').replace('點', '')) + 12
+                else:
+                    hour = int(time_str.replace('點', ''))
+                    
+                # 設定開始時間
+                start_time = datetime.strptime(f"{event_date} {hour:02d}:00", "%Y-%m-%d %H:%M")
+                
+                # 設定結束時間
+                duration = int(event_info.get('duration', 60))  # 預設 60 分鐘
+                end_time = start_time + timedelta(minutes=duration)
+                
+                # 建立行程
+                service = get_google_calendar_service(user_id)
+                if not service:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="無法建立 Google 日曆服務，請重新授權。")
+                    )
+                    return
+                    
+                event = {
+                    'summary': event_info.get('title', '未命名行程'),
+                    'start': {
+                        'dateTime': start_time.isoformat(),
+                        'timeZone': 'Asia/Taipei',
+                    },
+                    'end': {
+                        'dateTime': end_time.isoformat(),
+                        'timeZone': 'Asia/Taipei',
+                    },
+                }
+                
+                created_event = service.events().insert(calendarId='primary', body=event).execute()
+                
+                # 回覆用戶
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text=f"已成功建立行程：\n\n"
+                             f"📅 日期：{start_time.strftime('%Y-%m-%d')}\n"
+                             f"⏰ 時間：{start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}\n"
+                             f"📝 標題：{event['summary']}\n\n"
+                             f"您可以在 Google 日曆中查看詳細資訊。"
+                    )
+                )
+                
+            except Exception as e:
+                logger.error(f"處理行程時發生錯誤: {str(e)}")
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="處理行程時發生錯誤，請確認格式是否正確。")
+                )
+                
+        except Exception as e:
+            logger.error(f"解析行程內容時發生錯誤: {str(e)}")
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="解析行程內容時發生錯誤，請稍後再試。")
+            )
+            
+    except Exception as e:
+        logger.error(f"處理新增行程請求時發生錯誤: {str(e)}")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="處理您的請求時發生錯誤，請稍後再試。")
+        )
+
+def handle_event_query(event):
+    """處理查詢行程的請求"""
+    try:
+        user_id = event.source.user_id
+        text = event.message.text.strip()
+        
+        # 解析日期查詢
+        date_result = parse_date_query(text)
+        if not date_result:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="無法解析日期，請使用以下格式：\n- 查詢週五的行程\n- 查詢下週三的行程\n- 查詢 4/9 的行程")
+            )
+            return
+            
+        start_date, end_date, is_range = date_result
+        
+        # 取得 Google Calendar 服務
+        service = get_google_calendar_service(user_id)
+        if not service:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="無法連接 Google 日曆服務，請重新授權。")
+            )
+            return
+            
+        # 設定時間範圍
+        start_datetime = datetime.combine(start_date, datetime_time.min)
+        end_datetime = datetime.combine(end_date, datetime_time.max)
+        
+        # 查詢行程
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=start_datetime.isoformat() + 'Z',
+            timeMax=end_datetime.isoformat() + 'Z',
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        events = events_result.get('items', [])
+        
+        if not events:
+            if is_range:
+                message = f"從 {start_date} 到 {end_date} 沒有任何行程。"
+            else:
+                message = f"{start_date} 沒有任何行程。"
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=message)
+            )
+            return
+            
+        # 格式化回應訊息
+        if is_range:
+            message = f"以下是從 {start_date} 到 {end_date} 的行程：\n\n"
+        else:
+            message = f"以下是 {start_date} 的行程：\n\n"
+            
+        for event in events:
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            end = event['end'].get('dateTime', event['end'].get('date'))
+            
+            # 轉換時間格式
+            if 'T' in start:  # 如果是 dateTime 格式
+                start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                time_str = f"{start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}"
+            else:  # 如果是全天事件
+                time_str = "全天"
+                
+            message += f"📅 {event['summary']}\n"
+            message += f"⏰ {time_str}\n"
+            
+            if 'location' in event and event['location']:
+                message += f"📍 地點：{event['location']}\n"
+                
+            if 'description' in event and event['description']:
+                message += f"📝 說明：{event['description']}\n"
+                
+            message += "\n"
+            
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=message.strip())
+        )
+        
+    except Exception as e:
+        logger.error(f"查詢行程時發生錯誤: {str(e)}")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="查詢行程時發生錯誤，請稍後再試。")
+        )
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
