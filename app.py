@@ -884,13 +884,13 @@ def parse_date_query(text):
                 
                 # 計算到下週目標日期的天數
                 days_ahead = (target_weekday - current_weekday) % 7
-                if days_ahead <= 0:
-                    days_ahead += 7  # 如果目標日期在本週或之前，加7天到下週
+                days_ahead += 7  # 確保是下週
                 
                 # 計算目標日期
                 target_date = today + timedelta(days=days_ahead)
                 
                 logger.info(f"計算下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，需要 {days_ahead} 天")
+                return target_date, target_date, False
             elif date_str.startswith('下下週'):
                 weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
                 target_weekday = weekday_map[date_str[3]]
