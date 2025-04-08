@@ -769,6 +769,150 @@ def parse_event_text(text):
         return None
 
 @with_error_handling
+def parse_date_query(text):
+    """解析日期查詢請求"""
+    logger.info(f"開始解析日期查詢：{text}")
+    
+    try:
+        # 使用 GPT-4 進行語意分析
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """你是一個日期解析助手。請將用戶的自然語言輸入轉換成結構化的日期資訊。
+                    輸出格式要求：
+                    {
+                        "date_type": "今天|明天|後天|大後天|下週一|下週二|下週三|下週四|下週五|下週六|下週日|下下週一|下下週二|下下週三|下下週四|下下週五|下下週六|下下週日|X月Y日|X/Y",
+                        "is_date_range": false,
+                        "start_date": null,
+                        "end_date": null
+                    }
+                    
+                    規則：
+                    1. 如果用戶詢問特定日期的行程，將 is_date_range 設為 false
+                    2. 如果用戶詢問一段時間範圍的行程，將 is_date_range 設為 true，並設定 start_date 和 end_date
+                    3. 日期格式統一使用 YYYY-MM-DD
+                    
+                    範例：
+                    1. 輸入：「查詢下週三的行程」
+                       輸出：{
+                           "date_type": "下週三",
+                           "is_date_range": false,
+                           "start_date": null,
+                           "end_date": null
+                       }
+                    
+                    2. 輸入：「查詢下週一到下週五的行程」
+                       輸出：{
+                           "date_type": null,
+                           "is_date_range": true,
+                           "start_date": "2024-04-15",
+                           "end_date": "2024-04-19"
+                       }
+                    
+                    只輸出 JSON 格式，不要有其他文字。如果無法解析，輸出空物件 {}。
+                    """
+                },
+                {"role": "user", "content": text}
+            ],
+            temperature=0
+        )
+        
+        logger.info("收到 GPT-4 回應")
+        logger.info(f"GPT-4 原始回應：{response.choices[0].message.content}")
+        
+        parsed_data = json.loads(response.choices[0].message.content)
+        logger.info(f"GPT 解析結果：{json.dumps(parsed_data, ensure_ascii=False)}")
+        
+        if not parsed_data:
+            logger.info("GPT 無法解析文字")
+            return None
+            
+        # 取得當前時間
+        now = datetime.now()
+        today = now.date()
+        logger.info(f"當前日期：{today}")
+        
+        # 解析日期
+        if parsed_data.get('is_date_range'):
+            # 處理日期範圍
+            start_date = datetime.strptime(parsed_data['start_date'], '%Y-%m-%d').date()
+            end_date = datetime.strptime(parsed_data['end_date'], '%Y-%m-%d').date()
+            return start_date, end_date, True
+        else:
+            # 處理單一日期
+            date_str = parsed_data.get('date_type')
+            if not date_str:
+                logger.info("未找到日期類型")
+                return None
+                
+            logger.info(f"解析到的日期類型：{date_str}")
+            
+            # 計算目標日期
+            if date_str == '今天':
+                target_date = today
+            elif date_str == '明天':
+                target_date = today + timedelta(days=1)
+            elif date_str == '後天':
+                target_date = today + timedelta(days=2)
+            elif date_str == '大後天':
+                target_date = today + timedelta(days=3)
+            elif date_str.startswith('下週'):
+                weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
+                target_weekday = weekday_map[date_str[2]]
+                current_weekday = today.weekday()
+                
+                # 計算到下週目標日期的天數
+                days_ahead = target_weekday - current_weekday  # 目標日期與當前日期的差距
+                
+                # 確保是下週的日期
+                if days_ahead <= 0:  # 如果目標日期在本週，加 7 天到下週
+                    days_ahead += 7
+                
+                # 再加 7 天確保是下週
+                days_ahead += 7
+                
+                # 計算目標日期
+                target_date = today + timedelta(days=days_ahead)
+                
+                logger.info(f"計算下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，需要 {days_ahead} 天")
+            elif date_str.startswith('下下週'):
+                weekday_map = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6}
+                target_weekday = weekday_map[date_str[3]]
+                current_weekday = today.weekday()
+                
+                # 先找到下一個目標週幾
+                days_until_next = (target_weekday - current_weekday) % 7
+                if days_until_next == 0:
+                    days_until_next = 7
+                
+                # 計算到下下週的天數
+                days_to_next_next_week = 14 - current_weekday
+                
+                # 確保是下下週的日期
+                target_date = today + timedelta(days=days_to_next_next_week + target_weekday)
+                
+                logger.info(f"計算下下週日期：今天是週{current_weekday + 1}，目標是週{target_weekday + 1}，到下下週需要{days_to_next_next_week}天")
+            elif '/' in date_str:
+                # 處理 X/Y 格式的日期
+                month, day = map(int, date_str.split('/'))
+                target_date = today.replace(month=month, day=day)
+                if target_date < today:
+                    target_date = target_date.replace(year=target_date.year + 1)
+            else:
+                logger.info(f"無法解析的日期格式：{date_str}")
+                return None
+            
+            logger.info(f"計算得到的目標日期：{target_date}")
+            return target_date, target_date, False
+            
+    except Exception as e:
+        logger.error(f"解析日期查詢時發生錯誤: {str(e)}")
+        logger.exception("詳細錯誤資訊：")
+        return None
+
+@with_error_handling
 def create_calendar_event(service, event_data, line_user_id):
     """建立 Google Calendar 事件"""
     try:
@@ -848,54 +992,114 @@ def handle_message(event):
                 send_line_message(reply_token, f"抱歉，發生了一點問題：{error}\n請稍後再試，或聯繫系統管理員協助 🙏")
             else:
                 try:
-                    # 設定時間範圍（現在到7天後）
-                    now = datetime.utcnow().isoformat() + 'Z'
-                    end_time = (datetime.utcnow() + timedelta(days=7)).isoformat() + 'Z'
-
-                    # 查詢行程
-                    events_result = service.events().list(
-                        calendarId='primary',
-                        timeMin=now,
-                        timeMax=end_time,
-                        singleEvents=True,
-                        orderBy='startTime'
-                    ).execute()
-                    events = events_result.get('items', [])
-
-                    if not events:
-                        send_line_message(reply_token, "未來7天內沒有行程安排。")
-                        return
-
-                    # 格式化行程訊息
-                    message = '📅 未來7天內的行程：\n\n'
-                    for event in events:
-                        start = event['start'].get('dateTime', event['start'].get('date'))
-                        end = event['end'].get('dateTime', event['end'].get('date'))
+                    # 解析日期查詢
+                    date_query = parse_date_query(text)
+                    if date_query:
+                        start_date, end_date, is_range = date_query
                         
-                        # 轉換時間格式
-                        start_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                        end_time = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                        # 設定時間範圍
+                        start_time = datetime.combine(start_date, datetime_time.min).isoformat() + 'Z'
+                        end_time = datetime.combine(end_date, datetime_time.max).isoformat() + 'Z'
                         
-                        # 格式化時間
-                        if 'T' in start:  # 有具體時間的行程
-                            time_str = f"{start_time.strftime('%m/%d %H:%M')} - {end_time.strftime('%H:%M')}"
-                        else:  # 全天行程
-                            time_str = f"{start_time.strftime('%m/%d')} (全天)"
+                        # 查詢行程
+                        events_result = service.events().list(
+                            calendarId='primary',
+                            timeMin=start_time,
+                            timeMax=end_time,
+                            singleEvents=True,
+                            orderBy='startTime'
+                        ).execute()
+                        events = events_result.get('items', [])
                         
-                        message += f"⏰ {time_str}\n"
-                        message += f"📝 {event['summary']}\n"
-                        if event.get('description'):
-                            message += f"📋 {event['description']}\n"
-                        message += "─" * 13 + "\n"
-
-                    # 如果訊息太長，分多次發送
-                    if len(message) > 5000:
-                        chunks = [message[i:i+5000] for i in range(0, len(message), 5000)]
-                        for chunk in chunks:
-                            send_line_message(reply_token, chunk)
+                        if not events:
+                            if is_range:
+                                send_line_message(reply_token, f"{start_date.strftime('%Y年%m月%d日')} 到 {end_date.strftime('%Y年%m月%d日')} 沒有行程安排。")
+                            else:
+                                send_line_message(reply_token, f"{start_date.strftime('%Y年%m月%d日')} 沒有行程安排。")
+                            return
+                        
+                        # 格式化行程訊息
+                        if is_range:
+                            message = f'📅 {start_date.strftime("%Y年%m月%d日")} 到 {end_date.strftime("%Y年%m月%d日")} 的行程：\n\n'
+                        else:
+                            message = f'📅 {start_date.strftime("%Y年%m月%d日")} 的行程：\n\n'
+                            
+                        for event in events:
+                            start = event['start'].get('dateTime', event['start'].get('date'))
+                            end = event['end'].get('dateTime', event['end'].get('date'))
+                            
+                            # 轉換時間格式
+                            start_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                            end_time = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                            
+                            # 格式化時間
+                            if 'T' in start:  # 有具體時間的行程
+                                time_str = f"{start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}"
+                            else:  # 全天行程
+                                time_str = "全天"
+                            
+                            message += f"⏰ {time_str}\n"
+                            message += f"📝 {event['summary']}\n"
+                            if event.get('description'):
+                                message += f"📋 {event['description']}\n"
+                            message += "─" * 13 + "\n"
+                        
+                        # 如果訊息太長，分多次發送
+                        if len(message) > 5000:
+                            chunks = [message[i:i+5000] for i in range(0, len(message), 5000)]
+                            for chunk in chunks:
+                                send_line_message(reply_token, chunk)
+                        else:
+                            send_line_message(reply_token, message)
                     else:
-                        send_line_message(reply_token, message)
-
+                        # 預設查詢未來7天的行程
+                        now = datetime.utcnow().isoformat() + 'Z'
+                        end_time = (datetime.utcnow() + timedelta(days=7)).isoformat() + 'Z'
+                        
+                        # 查詢行程
+                        events_result = service.events().list(
+                            calendarId='primary',
+                            timeMin=now,
+                            timeMax=end_time,
+                            singleEvents=True,
+                            orderBy='startTime'
+                        ).execute()
+                        events = events_result.get('items', [])
+                        
+                        if not events:
+                            send_line_message(reply_token, "未來7天內沒有行程安排。")
+                            return
+                        
+                        # 格式化行程訊息
+                        message = '📅 未來7天內的行程：\n\n'
+                        for event in events:
+                            start = event['start'].get('dateTime', event['start'].get('date'))
+                            end = event['end'].get('dateTime', event['end'].get('date'))
+                            
+                            # 轉換時間格式
+                            start_time = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                            end_time = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                            
+                            # 格式化時間
+                            if 'T' in start:  # 有具體時間的行程
+                                time_str = f"{start_time.strftime('%m/%d %H:%M')} - {end_time.strftime('%H:%M')}"
+                            else:  # 全天行程
+                                time_str = f"{start_time.strftime('%m/%d')} (全天)"
+                            
+                            message += f"⏰ {time_str}\n"
+                            message += f"📝 {event['summary']}\n"
+                            if event.get('description'):
+                                message += f"📋 {event['description']}\n"
+                            message += "─" * 13 + "\n"
+                        
+                        # 如果訊息太長，分多次發送
+                        if len(message) > 5000:
+                            chunks = [message[i:i+5000] for i in range(0, len(message), 5000)]
+                            for chunk in chunks:
+                                send_line_message(reply_token, chunk)
+                        else:
+                            send_line_message(reply_token, message)
+                            
                 except Exception as e:
                     logger.error(f"查詢行程時發生錯誤: {str(e)}")
                     send_line_message(reply_token, "查詢行程時發生錯誤，請稍後再試。")
