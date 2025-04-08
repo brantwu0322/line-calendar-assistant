@@ -44,9 +44,6 @@ from flask_session import Session
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from googleapiclient.errors import HttpError
-from linebot import LineBotApi
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage, TextMessageContent
 
 # 設定日誌
 logging.basicConfig(
