@@ -1423,6 +1423,14 @@ def format_time(datetime_str):
     dt = parser.parse(datetime_str)
     return dt.strftime("%H:%M")
 
+def build_calendar_service(credentials):
+    """建立 Google Calendar 服務"""
+    try:
+        return build('calendar', 'v3', credentials=credentials)
+    except Exception as e:
+        logger.error(f"建立 Calendar 服務時發生錯誤：{str(e)}")
+        raise
+
 def handle_event_query(user_id, text):
     """處理行程查詢"""
     try:
@@ -1433,34 +1441,84 @@ def handle_event_query(user_id, text):
 
         # 建立 Google Calendar 服務
         service = build_calendar_service(credentials)
-        
-        # 設定時間範圍（今天到一週後）
-        now = datetime.datetime.utcnow()
-        time_min = now.isoformat() + 'Z'
-        time_max = (now + datetime.timedelta(days=7)).isoformat() + 'Z'
-        
-        # 查詢行程
+
+        # 解析日期
+        date_str = text.split()[1].replace("的行程", "")
+        try:
+            target_date = parse_chinese_date(date_str)
+        except ValueError:
+            return "無法解析日期，請使用正確的格式（例如：查詢 4/9 的行程）"
+
+        # 設定查詢時間範圍
+        time_min = target_date.replace(hour=0, minute=0, second=0).isoformat() + 'Z'
+        time_max = target_date.replace(hour=23, minute=59, second=59).isoformat() + 'Z'
+
+        # 獲取行程
         events_result = service.events().list(
             calendarId='primary',
             timeMin=time_min,
             timeMax=time_max,
-            maxResults=10,
             singleEvents=True,
             orderBy='startTime'
         ).execute()
-        
+
         events = events_result.get('items', [])
+
+        if not events:
+            return f"📅 {target_date.strftime('%Y-%m-%d')} 沒有任何行程"
+
+        # 格式化回應訊息
+        response = [f"📅 {target_date.strftime('%Y-%m-%d')} 的行程："]
         
-        # 使用新的格式化函數
-        message = format_event_list(events)
-        if events:
-            message += "\n\n📝 修改行程：輸入「修改行程 [編號] [新時間]」\n❌ 刪除行程：輸入「刪除行程 [編號]」"
+        for i, event in enumerate(events, 1):
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            end = event['end'].get('dateTime', event['end'].get('date'))
             
-        return message
+            if 'T' in start:  # 檢查是否包含時間
+                start_dt = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
+                end_dt = datetime.datetime.fromisoformat(end.replace('Z', '+00:00'))
+                time_str = f"⏰ {start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}"
+            else:
+                time_str = "📅 全天"
+
+            response.append(f"\n{i}. {time_str}")
+            response.append(f"📝 {event.get('summary', '(無標題)')}")
+            if event.get('description'):
+                response.append(f"📋 {event['description']}")
+
+        if len(events) > 0:
+            response.append("\n您可以使用以下指令管理行程：")
+            response.append("✏️ 修改行程 [編號] [新時間]")
+            response.append("❌ 刪除行程 [編號]")
+
+        return "\n".join(response)
 
     except Exception as e:
         logger.error(f"查詢行程時發生錯誤：{str(e)}")
         return "查詢行程時發生錯誤，請稍後再試。"
+
+def parse_chinese_date(date_str):
+    """解析中文日期格式"""
+    try:
+        # 移除可能的中文字
+        date_str = date_str.replace('月', '/').replace('日', '').replace('號', '')
+        
+        # 分割日期
+        parts = date_str.split('/')
+        if len(parts) != 2:
+            raise ValueError("日期格式錯誤")
+
+        month = int(parts[0])
+        day = int(parts[1])
+        
+        # 取得當前年份
+        current_year = datetime.datetime.now().year
+        
+        # 建立日期物件
+        return datetime.datetime(current_year, month, day)
+    except Exception as e:
+        logger.error(f"解析日期時發生錯誤：{str(e)}")
+        raise ValueError("無法解析日期格式")
 
 def handle_event_modification(user_id, text):
     """處理行程修改"""
