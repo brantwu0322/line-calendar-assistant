@@ -786,10 +786,10 @@ def parse_date_query(text):
                     
                     規則：
                     1. 如果用戶輸入「查詢行程」，將 date_type 設為 "default"
-                    2. 如果用戶輸入「查詢 X/Y 的行程」，將 date_type 設為 "X/Y"
-                    3. 如果用戶輸入「查詢週X的行程」，將 date_type 設為 "週X"
-                    4. 如果用戶輸入「查詢下週X的行程」，將 date_type 設為 "下週X"
-                    5. 如果用戶輸入「查詢 X月Y日 的行程」，將 date_type 設為 "X月Y日"
+                    2. 如果用戶輸入「查詢 X/Y 的行程」或「X/Y 的行程」，將 date_type 設為 "X/Y"
+                    3. 如果用戶輸入「查詢週X的行程」或「週X的行程」，將 date_type 設為 "週X"
+                    4. 如果用戶輸入「查詢下週X的行程」或「下週X的行程」，將 date_type 設為 "下週X"
+                    5. 如果用戶輸入「查詢 X月Y日 的行程」或「X月Y日的行程」，將 date_type 設為 "X月Y日"
                     
                     範例：
                     1. 輸入：「查詢行程」
@@ -800,7 +800,7 @@ def parse_date_query(text):
                            "end_date": null
                        }
                     
-                    2. 輸入：「查詢 4/9 的行程」
+                    2. 輸入：「查詢 4/9 的行程」或「4/9 的行程」
                        輸出：{
                            "date_type": "4/9",
                            "is_date_range": false,
@@ -808,7 +808,7 @@ def parse_date_query(text):
                            "end_date": null
                        }
                     
-                    3. 輸入：「查詢週五的行程」
+                    3. 輸入：「查詢週五的行程」或「週五的行程」
                        輸出：{
                            "date_type": "週五",
                            "is_date_range": false,
@@ -816,7 +816,7 @@ def parse_date_query(text):
                            "end_date": null
                        }
                     
-                    4. 輸入：「查詢下週三的行程」
+                    4. 輸入：「查詢下週三的行程」或「下週三的行程」
                        輸出：{
                            "date_type": "下週三",
                            "is_date_range": false,
