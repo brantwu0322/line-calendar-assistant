@@ -1103,11 +1103,13 @@ def handle_message(event):
                         chunks = [message[i:i+5000] for i in range(0, len(message), 5000)]
                         for chunk in chunks:
                             send_line_message(reply_token, chunk)
-        send_line_message(reply_token, message)
+            except Exception as e:
+                logger.error(f"查詢行程時發生錯誤: {str(e)}")
+                send_line_message(reply_token, "查詢行程時發生錯誤，請稍後再試。")
 
     except Exception as e:
-        logger.error(f"查詢行程時發生錯誤: {str(e)}")
-        send_line_message(reply_token, "查詢行程時發生錯誤，請稍後再試。")
+        logger.error(f"處理文字訊息時發生錯誤: {str(e)}")
+        send_line_message(reply_token, "處理文字訊息時發生錯誤，請稍後再試。")
 
 def handle_event_creation(service, text):
     """處理新增行程"""
@@ -1150,6 +1152,73 @@ def handle_event_creation(service, text):
     except Exception as e:
         logger.error(f"新增行程時發生錯誤: {str(e)}")
         return "新增行程時發生錯誤，請稍後再試"
+
+def handle_event_query(user_id, text, reply_token):
+    """處理行程查詢"""
+    try:
+        # 解析日期
+        date = parse_date_query(text)
+        if not date:
+            send_line_message(reply_token, "無法識別日期，請使用以下格式：\n今天、明天、後天、週一、下週三、12/25、2024/1/1")
+            return
+
+        # 獲取使用者授權
+        credentials = get_user_credentials(user_id)
+        if not credentials:
+            send_line_message(reply_token, "請先完成 Google 日曆授權。")
+            return
+
+        # 建立 Google Calendar 服務
+        service = build('calendar', 'v3', credentials=credentials)
+
+        # 設定時間範圍
+        time_min = datetime.combine(date, datetime.min.time()).isoformat() + 'Z'
+        time_max = datetime.combine(date, datetime.max.time()).isoformat() + 'Z'
+
+        # 查詢行程
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        events = events_result.get('items', [])
+
+        if not events:
+            send_line_message(reply_token, f"{date.strftime('%Y-%m-%d')} 沒有行程。")
+            return
+
+        # 建立回覆訊息
+        message = f"📅 {date.strftime('%Y-%m-%d')} 的行程：\n\n"
+        
+        for i, event in enumerate(events, 1):
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            end = event['end'].get('dateTime', event['end'].get('date'))
+            
+            # 格式化時間
+            if 'T' in start:
+                start_time = datetime.fromisoformat(start.replace('Z', '+00:00')).strftime('%H:%M')
+                end_time = datetime.fromisoformat(end.replace('Z', '+00:00')).strftime('%H:%M')
+                time_str = f"⏰ {start_time} - {end_time}"
+            else:
+                time_str = "⏰ 全天"
+            
+            message += f"{i}. {time_str}\n"
+            message += f"   📝 {event['summary']}\n"
+            if 'description' in event:
+                message += f"   📋 {event['description']}\n"
+            message += "\n"
+        
+        message += "\n💡 提示：\n"
+        message += "使用「修改行程 [編號] [新時間]」來修改行程\n"
+        message += "使用「刪除行程 [編號]」來刪除行程"
+        
+        send_line_message(reply_token, message)
+    except Exception as e:
+        logger.error(f"查詢行程時發生錯誤: {str(e)}")
+        send_line_message(reply_token, "查詢行程時發生錯誤，請稍後再試。")
+        return
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
