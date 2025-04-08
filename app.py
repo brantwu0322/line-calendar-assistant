@@ -68,15 +68,81 @@ except Exception as e:
     logger.error(f"創建資料庫目錄時發生錯誤：{str(e)}")
     raise
 
-# 初始化資料庫連接
+# 初始化資料庫
 try:
     conn = sqlite3.connect(DB_PATH)
-    init_db(conn)
+    c = conn.cursor()
+    
+    # 創建用戶表
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        line_user_id TEXT UNIQUE NOT NULL,
+        google_credentials TEXT,
+        google_email TEXT,
+        auth_state TEXT,
+        subscription_status TEXT DEFAULT 'free',
+        subscription_end_date TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # 創建行程記錄表
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        line_user_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
+    )
+    ''')
+    
+    # 創建管理員表
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS admins (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # 創建訂單表
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT UNIQUE NOT NULL,
+        line_user_id TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
+    )
+    ''')
+    
+    # 檢查是否已存在管理員帳號
+    c.execute('SELECT COUNT(*) FROM admins')
+    if c.fetchone()[0] == 0:
+        # 創建默認管理員帳號
+        default_username = 'admin'
+        default_password = generate_password_hash('admin')
+        c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
+                 (default_username, default_password))
+        logger.info('已創建默認管理員帳號')
+    
+    conn.commit()
     conn.close()
     logger.info("資料庫初始化成功")
 except Exception as e:
     logger.error(f"資料庫初始化失敗：{str(e)}")
     logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
+    if conn:
+        conn.close()
     raise
 
 app = Flask(__name__)
