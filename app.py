@@ -778,7 +778,7 @@ def parse_date_query(text):
                     "content": """你是一個日期解析助手。請將用戶的自然語言輸入轉換成結構化的日期資訊。
                     輸出格式要求：
                     {
-                        "date_type": "今天|明天|後天|大後天|下週一|下週二|下週三|下週四|下週五|下週六|下週日|下下週一|下下週二|下下週三|下下週四|下下週五|下下週六|下下週日|X月Y日|X/Y|default",
+                        "date_type": "今天|明天|後天|大後天|下週一|下週二|下週三|下週四|下週五|下週六|下週日|下下週一|下下週二|下下週三|下下週四|下下週五|下下週六|下下週日|X月Y日|X/Y|default|週一|週二|週三|週四|週五|週六|週日",
                         "is_date_range": false,
                         "start_date": null,
                         "end_date": null
@@ -794,6 +794,7 @@ def parse_date_query(text):
                     7. 如果用戶輸入「查詢 X/Y 的行程」，將其轉換為「查詢 X月Y日 的行程」
                     8. 對於 X/Y 格式的日期，如果月份小於當前月份，則視為明年
                     9. 當用戶輸入「查詢下週X的行程」時，將 date_type 設為「下週X」，is_date_range 設為 false
+                    10. 當用戶輸入「查詢週X的行程」時，將 date_type 設為「週X」，is_date_range 設為 false
                     
                     範例：
                     1. 輸入：「查詢行程」
@@ -820,12 +821,12 @@ def parse_date_query(text):
                            "end_date": null
                        }
                     
-                    4. 輸入：「查詢下週一到下週五的行程」
+                    4. 輸入：「查詢週五的行程」
                        輸出：{
-                           "date_type": null,
-                           "is_date_range": true,
-                           "start_date": "2024-04-15",
-                           "end_date": "2024-04-19"
+                           "date_type": "週五",
+                           "is_date_range": false,
+                           "start_date": null,
+                           "end_date": null
                        }
                     
                     只輸出 JSON 格式，不要有其他文字。如果無法解析，輸出空物件 {}。
@@ -916,6 +917,12 @@ def parse_date_query(text):
                 # 處理 X月Y日 格式的日期
                 month = int(date_str.split('月')[0])
                 day = int(date_str.split('月')[1].split('日')[0])
+                target_date = today.replace(month=month, day=day)
+                if target_date < today:
+                    target_date = target_date.replace(year=target_date.year + 1)
+            elif '/' in date_str:
+                # 處理 X/Y 格式的日期
+                month, day = map(int, date_str.split('/'))
                 target_date = today.replace(month=month, day=day)
                 if target_date < today:
                     target_date = target_date.replace(year=target_date.year + 1)
