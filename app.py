@@ -790,11 +790,6 @@ def parse_date_query(text):
                     3. 如果用戶輸入「查詢週X的行程」，將 date_type 設為 "週X"
                     4. 如果用戶輸入「查詢下週X的行程」，將 date_type 設為 "下週X"
                     5. 如果用戶輸入「查詢 X月Y日 的行程」，將 date_type 設為 "X月Y日"
-                    6. 如果用戶輸入「查詢 X/Y 的行程」，將 date_type 設為 "X/Y"
-                    7. 如果用戶輸入「查詢下週X的行程」，將 date_type 設為 "下週X"
-                    8. 如果用戶輸入「查詢週X的行程」，將 date_type 設為 "週X"
-                    9. 如果用戶輸入「查詢 X月Y日 的行程」，將 date_type 設為 "X月Y日"
-                    10. 如果用戶輸入「查詢 X/Y 的行程」，將 date_type 設為 "X/Y"
                     
                     範例：
                     1. 輸入：「查詢行程」
