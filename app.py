@@ -236,13 +236,14 @@ def init_db(conn):
     """初始化資料庫"""
     c = conn.cursor()
     
-    # 創建用戶表
+    # 創建用戶表（新增 auth_state 欄位）
     c.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         line_user_id TEXT UNIQUE NOT NULL,
         google_credentials TEXT,
         google_email TEXT,
+        auth_state TEXT,
         subscription_status TEXT DEFAULT 'free',
         subscription_end_date TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -426,14 +427,25 @@ def save_user_credentials(conn, line_user_id, credentials):
         user_exists = cursor.fetchone() is not None
         
         if user_exists:
-            # 如果用戶已存在，只更新 google_credentials
-            cursor.execute('UPDATE users SET google_credentials = ? WHERE line_user_id = ?',
-                         (json.dumps(creds_dict), line_user_id))
-        else:
-            # 如果用戶不存在，創建新用戶
+            # 更新用戶資料，包括授權狀態
             cursor.execute('''
-            INSERT INTO users (line_user_id, google_credentials, subscription_status, subscription_end_date)
-            VALUES (?, ?, 'free', NULL)
+                UPDATE users 
+                SET google_credentials = ?,
+                    auth_state = 'authorized',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE line_user_id = ?
+            ''', (json.dumps(creds_dict), line_user_id))
+        else:
+            # 創建新用戶
+            cursor.execute('''
+                INSERT INTO users (
+                    line_user_id, 
+                    google_credentials, 
+                    auth_state,
+                    subscription_status, 
+                    subscription_end_date
+                )
+                VALUES (?, ?, 'authorized', 'free', NULL)
             ''', (line_user_id, json.dumps(creds_dict)))
         
         conn.commit()
@@ -441,6 +453,7 @@ def save_user_credentials(conn, line_user_id, credentials):
         return True
     except Exception as e:
         logger.error(f"儲存用戶憑證時發生錯誤: {str(e)}")
+        conn.rollback()
         raise
 
 def get_google_calendar_service(line_user_id=None):
@@ -1234,42 +1247,37 @@ def delete_user():
 def oauth2callback(conn):
     """處理 Google OAuth 回調"""
     try:
-        # 獲取授權碼和狀態
+        # 獲取授權碼
         code = request.args.get('code')
         state = request.args.get('state')
         
-        if not code or not state:
-            return "授權失敗：缺少必要的參數", 400
-        
-        # 從狀態中獲取用戶 ID
-        line_user_id = state
-        
-        # 獲取應用程式 URL
-        app_url = os.getenv('APP_URL', 'https://line-calendar-assistant.onrender.com').rstrip('/')
-        if not app_url.startswith('https://'):
-            app_url = f"https://{app_url.replace('http://', '')}"
-        redirect_uri = f"{app_url}/oauth2callback"
-        
-        # 載入客戶端憑證
+        if not code:
+            return "未收到授權碼", 400
+            
+        # 從 state 參數中獲取 LINE 用戶 ID
+        try:
+            state_data = json.loads(state)
+            line_user_id = state_data.get('line_user_id')
+        except:
+            return "無效的 state 參數", 400
+            
+        if not line_user_id:
+            return "無法識別用戶", 400
+            
+        # 獲取 Google OAuth 配置
         credentials_json = os.getenv('GOOGLE_CREDENTIALS')
         if not credentials_json:
-            return "未設定 GOOGLE_CREDENTIALS 環境變數", 500
+            return "未設定 Google 憑證", 500
             
         try:
-            credentials_info = json.loads(credentials_json)
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-                json.dump(credentials_info, temp_file)
-                temp_file_path = temp_file.name
-            
             # 建立 OAuth 流程
             flow = Flow.from_client_secrets_file(
-                temp_file_path,
+                CLIENT_SECRETS_FILE,
                 SCOPES,
-                redirect_uri=redirect_uri
+                redirect_uri=url_for('oauth2callback', _external=True)
             )
-            os.unlink(temp_file_path)
             
-            # 交換授權碼
+            # 交換授權碼獲取憑證
             flow.fetch_token(code=code)
             credentials = flow.credentials
             
@@ -1288,7 +1296,13 @@ def oauth2callback(conn):
                 if email:
                     # 更新用戶的 Google 電子郵件
                     cursor = conn.cursor()
-                    cursor.execute('UPDATE users SET google_email = ? WHERE line_user_id = ?', (email, line_user_id))
+                    cursor.execute('''
+                        UPDATE users 
+                        SET google_email = ?,
+                            auth_state = 'authorized',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE line_user_id = ?
+                    ''', (email, line_user_id))
                     conn.commit()
                     
                     return render_template('oauth_success.html')
@@ -1297,10 +1311,9 @@ def oauth2callback(conn):
             else:
                 return "無法獲取用戶資訊", 500
             
-        except json.JSONDecodeError:
-            return "GOOGLE_CREDENTIALS 環境變數格式錯誤", 500
         except Exception as e:
             logger.error(f"處理 OAuth 回調時發生錯誤：{str(e)}")
+            conn.rollback()
             return f"授權失敗：{str(e)}", 500
             
     except Exception as e:
