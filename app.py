@@ -19,7 +19,7 @@ from linebot.v3.webhooks import (
     TextMessageContent
 )
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import InstalledAppFlow, Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -100,10 +100,16 @@ def get_google_credentials_from_env():
     try:
         credentials_json = os.getenv('GOOGLE_CREDENTIALS')
         if not credentials_json:
-            raise ValueError("GOOGLE_CREDENTIALS 環境變數未設定")
+            logger.error("GOOGLE_CREDENTIALS 環境變數未設定")
+            return None
+        
+        logger.info("成功讀取 GOOGLE_CREDENTIALS")
         return json.loads(credentials_json)
+    except json.JSONDecodeError as e:
+        logger.error(f"GOOGLE_CREDENTIALS 格式錯誤: {str(e)}")
+        return None
     except Exception as e:
-        logger.error(f"從環境變數讀取 Google 憑證時發生錯誤: {e}")
+        logger.error(f"從環境變數讀取 Google 憑證時發生錯誤: {str(e)}")
         return None
 
 # 檢查並更新 Google 授權
@@ -423,39 +429,54 @@ def handle_event_deletion(user_id, text):
         return "查詢日曆時發生錯誤，請稍後再試"
 
 # 處理授權請求
-def handle_authorization_request(user_id):
+def handle_authorization_request(line_user_id):
     try:
-        # 從環境變數讀取憑證
-        credentials_dict = get_google_credentials_from_env()
-        if not credentials_dict:
-            return "無法讀取 Google 憑證，請聯繫管理員"
+        # 檢查是否已經授權
+        db = get_db()
+        user = db.execute('SELECT * FROM users WHERE line_user_id = ?', (line_user_id,)).fetchone()
         
-        # 建立授權流程
-        flow = InstalledAppFlow.from_client_config(
-            credentials_dict,
-            ['https://www.googleapis.com/auth/calendar']
+        if user and user['google_credentials']:
+            return TextSendMessage(text='您已經完成授權了！')
+        
+        # 建立 OAuth 2.0 流程
+        flow = Flow.from_client_config(
+            client_config={
+                "web": {
+                    "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+                    "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                }
+            },
+            scopes=['https://www.googleapis.com/auth/calendar'],
+            redirect_uri=os.getenv('APP_URL') + '/oauth2callback'
         )
-        flow.redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', 'https://line-calendar-assistant.onrender.com/oauth2callback')
         
         # 產生授權 URL
-        auth_url, _ = flow.authorization_url(prompt='consent')
+        auth_url, _ = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent'
+        )
         
-        # 儲存授權狀態
-        db = get_db()
-        try:
-            cursor = db.cursor()
-            cursor.execute(
-                "INSERT INTO users (line_user_id, auth_state) VALUES (?, ?) ON CONFLICT(line_user_id) DO UPDATE SET auth_state = excluded.auth_state",
-                (user_id, flow.state)
+        # 儲存 state 到資料庫
+        if not user:
+            db.execute(
+                'INSERT INTO users (line_user_id, auth_state) VALUES (?, ?)',
+                (line_user_id, flow._state)
             )
-            db.commit()
-        finally:
-            db.close()
+        else:
+            db.execute(
+                'UPDATE users SET auth_state = ? WHERE line_user_id = ?',
+                (flow._state, line_user_id)
+            )
+        db.commit()
         
-        return f"請點擊以下連結完成 Google 日曆授權：\n{auth_url}"
+        return TextSendMessage(text=f'請點擊以下連結進行授權：\n{auth_url}')
+        
     except Exception as e:
-        logger.error(f"產生授權 URL 時發生錯誤: {e}")
-        return "產生授權 URL 時發生錯誤，請稍後再試"
+        logger.error(f"產生授權 URL 時發生錯誤: {str(e)}")
+        return TextSendMessage(text='產生授權 URL 時發生錯誤，請稍後再試')
 
 # 處理授權回調
 @app.route('/oauth2callback')
@@ -569,7 +590,7 @@ def handle_message(event):
                     line_bot_api.reply_message(
                         ReplyMessageRequest(
                             reply_token=event.reply_token,
-                            messages=[TextMessage(text=f'請點擊以下連結進行授權：\n{auth_url}')]
+                            messages=[auth_url]
                         )
                     )
                 else:
@@ -599,7 +620,7 @@ def handle_message(event):
                 line_bot_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text=response)]
+                        messages=[response]
                     )
                 )
                 return
@@ -610,7 +631,7 @@ def handle_message(event):
                 line_bot_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text=response)]
+                        messages=[response]
                     )
                 )
                 return
@@ -621,7 +642,7 @@ def handle_message(event):
                 line_bot_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text=response)]
+                        messages=[response]
                     )
                 )
                 return
