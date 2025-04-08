@@ -31,7 +31,6 @@ from googleapiclient.discovery import build
 import speech_recognition as sr
 import tempfile
 import json
-import openai
 import requests
 import traceback
 from pydub import AudioSegment
@@ -44,6 +43,7 @@ from flask_session import Session
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from googleapiclient.errors import HttpError
+from openai import OpenAI
 
 # 設定日誌
 logging.basicConfig(
@@ -84,6 +84,13 @@ logger.info(f'GOOGLE_CALENDAR_ID: {os.getenv("GOOGLE_CALENDAR_ID")}')
 
 configuration = Configuration(access_token=channel_access_token)
 handler = WebhookHandler(channel_secret)
+
+# 初始化 LINE Bot API
+with ApiClient(configuration) as api_client:
+    line_bot_api = MessagingApi(api_client)
+
+# 初始化 OpenAI 客戶端
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 # Google Calendar API 設定
 SCOPES = [
