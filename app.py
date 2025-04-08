@@ -1406,8 +1406,8 @@ def oauth2callback(conn):
 def get_all_admins(conn):
     """獲取所有管理員列表"""
     cursor = conn.cursor()
-    cursor.execute('SELECT username FROM admins')
-    return [{'username': row[0]} for row in cursor.fetchall()]
+    cursor.execute('SELECT username, created_at FROM admins')
+    return [{'username': row[0], 'created_at': datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S')} for row in cursor.fetchall()]
 
 @app.route('/admin/add', methods=['POST'])
 def add_admin():
