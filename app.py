@@ -1648,6 +1648,61 @@ def handle_event_deletion(user_id, text):
         logger.error(f"刪除行程時發生錯誤：{str(e)}")
         return "刪除行程時發生錯誤，請稍後再試。"
 
+def format_event_confirmation(event):
+    """格式化行程確認訊息"""
+    try:
+        start = event['start'].get('dateTime', event['start'].get('date'))
+        end = event['end'].get('dateTime', event['end'].get('date'))
+        
+        start_dt = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
+        end_dt = datetime.datetime.fromisoformat(end.replace('Z', '+00:00'))
+        
+        # 只顯示日期，不顯示時間
+        date_str = f"📅 日期：{start_dt.strftime('%Y年%m月%d日')}"
+        
+        # 只顯示時間，不顯示日期
+        time_str = f"⏰ 時間：{start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}"
+        
+        message = [
+            "✅ 行程建立成功！",
+            date_str,
+            time_str,
+            f"📝 標題：{event.get('summary', '(無標題)')}"
+        ]
+        
+        if event.get('description'):
+            message.append(f"📋 描述：{event['description']}")
+            
+        return "\n".join(message)
+        
+    except Exception as e:
+        logger.error(f"格式化行程確認訊息時發生錯誤：{str(e)}")
+        return "行程已建立，但無法顯示詳細資訊。"
+
+def handle_event_creation(user_id, event_info):
+    """處理建立行程"""
+    try:
+        # 檢查用戶授權
+        credentials = get_user_credentials(user_id)
+        if not credentials:
+            return "請先進行 Google Calendar 授權才能建立行程。\n授權網址：" + get_authorization_url()
+
+        # 建立 Google Calendar 服務
+        service = build_calendar_service(credentials)
+        
+        # 建立行程
+        event = service.events().insert(
+            calendarId='primary',
+            body=event_info
+        ).execute()
+        
+        # 使用新的格式化函數來產生回覆訊息
+        return format_event_confirmation(event)
+        
+    except Exception as e:
+        logger.error(f"建立行程時發生錯誤：{str(e)}")
+        return "建立行程時發生錯誤，請稍後再試。"
+
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
     logger.info(f"LINE_CHANNEL_ACCESS_TOKEN: {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')[:10]}...")
