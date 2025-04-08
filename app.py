@@ -790,12 +790,21 @@ def parse_date_query(text):
                     }
                     
                     規則：
-                    1. 如果用戶詢問特定日期的行程，將 is_date_range 設為 false
-                    2. 如果用戶詢問一段時間範圍的行程，將 is_date_range 設為 true，並設定 start_date 和 end_date
-                    3. 日期格式統一使用 YYYY-MM-DD
+                    1. 如果用戶只輸入「查詢行程」，將 date_type 設為 "default"，表示預設查詢未來7天
+                    2. 如果用戶詢問特定日期的行程，將 is_date_range 設為 false
+                    3. 如果用戶詢問一段時間範圍的行程，將 is_date_range 設為 true，並設定 start_date 和 end_date
+                    4. 日期格式統一使用 YYYY-MM-DD
                     
                     範例：
-                    1. 輸入：「查詢下週三的行程」
+                    1. 輸入：「查詢行程」
+                       輸出：{
+                           "date_type": "default",
+                           "is_date_range": false,
+                           "start_date": null,
+                           "end_date": null
+                       }
+                    
+                    2. 輸入：「查詢下週三的行程」
                        輸出：{
                            "date_type": "下週三",
                            "is_date_range": false,
@@ -803,7 +812,7 @@ def parse_date_query(text):
                            "end_date": null
                        }
                     
-                    2. 輸入：「查詢下週一到下週五的行程」
+                    3. 輸入：「查詢下週一到下週五的行程」
                        輸出：{
                            "date_type": null,
                            "is_date_range": true,
@@ -834,6 +843,12 @@ def parse_date_query(text):
         today = now.date()
         logger.info(f"當前日期：{today}")
         
+        # 如果是預設查詢（未來7天）
+        if parsed_data.get('date_type') == 'default':
+            start_date = today
+            end_date = today + timedelta(days=7)
+            return start_date, end_date, True
+            
         # 解析日期
         if parsed_data.get('is_date_range'):
             # 處理日期範圍
