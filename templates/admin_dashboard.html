@@ -165,6 +165,56 @@
                 </form>
             </div>
         </div>
+
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">管理員帳號管理</h5>
+            </div>
+            <div class="card-body">
+                <!-- 新增管理員表單 -->
+                <form id="addAdminForm" method="POST" action="{{ url_for('add_admin') }}" class="mb-4">
+                    <h6>新增管理員</h6>
+                    <div class="mb-3">
+                        <label for="new_admin_username" class="form-label">使用者名稱</label>
+                        <input type="text" class="form-control" id="new_admin_username" name="username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new_admin_password" class="form-label">密碼</label>
+                        <input type="password" class="form-control" id="new_admin_password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">新增管理員</button>
+                </form>
+
+                <!-- 管理員列表 -->
+                <h6>管理員列表</h6>
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>使用者名稱</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for admin in admins %}
+                            <tr>
+                                <td>{{ admin.username }}</td>
+                                <td>
+                                    {% if admin.username != current_admin %}
+                                    <button class="btn btn-sm btn-danger" onclick="deleteAdmin('{{ admin.username }}')">刪除</button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="2" class="text-center">沒有其他管理員</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -186,6 +236,27 @@
                 .catch(error => {
                     console.error('Error:', error);
                     alert('刪除使用者時發生錯誤');
+                });
+            }
+        }
+
+        function deleteAdmin(username) {
+            if (confirm('確定要刪除此管理員嗎？此操作無法復原。')) {
+                fetch(`/admin/delete/${username}`, {
+                    method: 'POST',
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('管理員已成功刪除');
+                        location.reload();
+                    } else {
+                        alert(data.message || '刪除管理員時發生錯誤');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('刪除管理員時發生錯誤');
                 });
             }
         }

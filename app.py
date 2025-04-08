@@ -1256,6 +1256,67 @@ def admin_dashboard():
     users = get_all_users()
     return render_template('admin_dashboard.html', users=users)
 
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin_logged_in', None)
+    return redirect(url_for('admin_login'))
+
+@app.route('/admin/change_password', methods=['POST'])
+def change_admin_password():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': '請先登入'}), 401
+    
+    current_password = request.form.get('current_password')
+    new_password = request.form.get('new_password')
+    confirm_password = request.form.get('confirm_password')
+    
+    if not all([current_password, new_password, confirm_password]):
+        return jsonify({'success': False, 'message': '所有欄位都必須填寫'}), 400
+    
+    if new_password != confirm_password:
+        return jsonify({'success': False, 'message': '新密碼與確認密碼不符'}), 400
+    
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        # 驗證當前密碼
+        cursor.execute('SELECT username, password FROM admins LIMIT 1')
+        admin = cursor.fetchone()
+        if not check_password_hash(admin['password'], current_password):
+            return jsonify({'success': False, 'message': '當前密碼錯誤'}), 400
+        
+        # 更新密碼
+        new_password_hash = generate_password_hash(new_password)
+        cursor.execute('UPDATE admins SET password = ? WHERE username = ?',
+                      (new_password_hash, admin['username']))
+        conn.commit()
+        return jsonify({'success': True, 'message': '密碼已成功更新'})
+    except Exception as e:
+        logger.error(f'更新管理員密碼時發生錯誤: {str(e)}')
+        return jsonify({'success': False, 'message': '更新密碼時發生錯誤'}), 500
+    finally:
+        conn.close()
+
+@app.route('/admin/delete_user/<line_user_id>', methods=['POST'])
+def delete_user():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': '請先登入'}), 401
+    
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        # 刪除使用者相關資料
+        cursor.execute('DELETE FROM events WHERE line_user_id = ?', (line_user_id,))
+        cursor.execute('DELETE FROM orders WHERE line_user_id = ?', (line_user_id,))
+        cursor.execute('DELETE FROM users WHERE line_user_id = ?', (line_user_id,))
+        conn.commit()
+        return jsonify({'success': True, 'message': '使用者已成功刪除'})
+    except Exception as e:
+        logger.error(f'刪除使用者時發生錯誤: {str(e)}')
+        return jsonify({'success': False, 'message': '刪除使用者時發生錯誤'}), 500
+    finally:
+        conn.close()
+
 @app.route('/oauth2callback')
 @with_db_connection
 def oauth2callback(conn):
