@@ -1155,13 +1155,14 @@ def save_event(conn, line_user_id, event_id, summary, start_time, end_time):
 
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
+    """管理員登入頁面"""
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
         
         if verify_admin(username, password):
             session['admin_logged_in'] = True
-            session['admin_username'] = username  # 儲存管理員用戶名到 session
+            session['admin_username'] = username
             return redirect(url_for('admin_dashboard'))
         else:
             flash('帳號或密碼錯誤')
@@ -1171,6 +1172,7 @@ def admin_login():
 
 @app.route('/admin/dashboard')
 def admin_dashboard():
+    """管理員儀表板"""
     try:
         if not session.get('admin_logged_in'):
             return redirect(url_for('admin_login'))
@@ -1204,11 +1206,14 @@ def admin_dashboard():
 
 @app.route('/admin/logout')
 def admin_logout():
+    """管理員登出"""
     session.pop('admin_logged_in', None)
+    session.pop('admin_username', None)
     return redirect(url_for('admin_login'))
 
 @app.route('/admin/change_password', methods=['POST'])
 def change_admin_password():
+    """修改管理員密碼"""
     if not session.get('admin_logged_in'):
         return jsonify({'success': False, 'message': '請先登入'}), 401
     
@@ -1226,9 +1231,9 @@ def change_admin_password():
     try:
         cursor = conn.cursor()
         # 驗證當前密碼
-        cursor.execute('SELECT username, password FROM admins LIMIT 1')
+        cursor.execute('SELECT username, password FROM admins WHERE username = ?', (session.get('admin_username'),))
         admin = cursor.fetchone()
-        if not check_password_hash(admin['password'], current_password):
+        if not admin or not check_password_hash(admin['password'], current_password):
             return jsonify({'success': False, 'message': '當前密碼錯誤'}), 400
         
         # 更新密碼
@@ -1244,7 +1249,8 @@ def change_admin_password():
         conn.close()
 
 @app.route('/admin/delete_user/<line_user_id>', methods=['POST'])
-def delete_user():
+def delete_user(line_user_id):
+    """刪除使用者"""
     if not session.get('admin_logged_in'):
         return jsonify({'success': False, 'message': '請先登入'}), 401
     
@@ -1338,6 +1344,7 @@ def get_all_admins(conn):
 
 @app.route('/admin/add', methods=['POST'])
 def add_admin():
+    """新增管理員"""
     if not session.get('admin_logged_in'):
         return jsonify({'success': False, 'message': '請先登入'}), 401
     
@@ -1369,6 +1376,7 @@ def add_admin():
 
 @app.route('/admin/delete/<username>', methods=['POST'])
 def delete_admin(username):
+    """刪除管理員"""
     if not session.get('admin_logged_in'):
         return jsonify({'success': False, 'message': '請先登入'}), 401
     
