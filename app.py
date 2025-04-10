@@ -550,10 +550,10 @@ def get_google_calendar_service(line_user_id):
                         "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
                         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                         "token_uri": "https://oauth2.googleapis.com/token",
-                        "redirect_uris": [os.getenv('GOOGLE_REDIRECT_URI')]
+                        "redirect_uris": [OAUTH_REDIRECT_URI]
                     }
                 },
-                ['https://www.googleapis.com/auth/calendar']
+                SCOPES
             )
             auth_url, _ = flow.authorization_url(
                 access_type='offline',
@@ -1394,9 +1394,8 @@ def oauth2callback(conn):
         # 獲取 Google OAuth 配置
         client_id = os.getenv('GOOGLE_CLIENT_ID')
         client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
-        redirect_uri = os.getenv('GOOGLE_REDIRECT_URI')
         
-        if not all([client_id, client_secret, redirect_uri]):
+        if not all([client_id, client_secret]):
             logger.error("缺少 Google OAuth 配置")
             return "授權失敗：缺少必要的配置", 500
         
@@ -1408,11 +1407,11 @@ def oauth2callback(conn):
                     "client_secret": client_secret,
                     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                     "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [redirect_uri]
+                    "redirect_uris": [OAUTH_REDIRECT_URI]
                 }
             },
-            scopes=['https://www.googleapis.com/auth/calendar'],
-            redirect_uri=redirect_uri
+            scopes=SCOPES,
+            redirect_uri=OAUTH_REDIRECT_URI
         )
         
         # 交換授權碼獲取憑證
@@ -1437,7 +1436,7 @@ def oauth2callback(conn):
         conn.commit()
         
         logger.info(f"Google 授權成功: {line_user_id}")
-        return "Google 日曆授權成功！您現在可以使用日曆功能了。"
+        return render_template('oauth_success.html')
     except Exception as e:
         logger.error(f"Google 授權回調處理失敗: {str(e)}")
         return f"授權失敗：{str(e)}", 500
