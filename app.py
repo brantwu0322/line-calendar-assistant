@@ -112,19 +112,6 @@ try:
     )
     ''')
     
-    # 創建訂單表
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id TEXT UNIQUE NOT NULL,
-        line_user_id TEXT NOT NULL,
-        amount INTEGER NOT NULL,
-        status TEXT DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
-    )
-    ''')
-    
     # 檢查是否已存在管理員帳號
     c.execute('SELECT COUNT(*) FROM admins')
     if c.fetchone()[0] == 0:
