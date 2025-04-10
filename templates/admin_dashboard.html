@@ -74,27 +74,23 @@
 </head>
 <body>
     <!-- 左側選單 -->
-    <div class="sidebar col-md-3 col-lg-2">
+    <div class="sidebar col-md-3 col-lg-2 d-flex flex-column">
         <div class="text-center mb-4">
             <h4 class="text-white">管理員後台</h4>
             <p class="text-white">目前登入：{{ current_admin }}</p>
         </div>
-        <nav class="nav flex-column">
+        <nav class="nav flex-column flex-grow-1">
             <a class="nav-link active" href="#" data-section="stats">
                 <i class="fas fa-chart-bar"></i> 使用者統計
             </a>
             <a class="nav-link" href="#" data-section="admins">
                 <i class="fas fa-users-cog"></i> 管理員帳號管理
             </a>
-            <div class="mt-auto">
-                <a class="nav-link" href="#" data-section="password">
-                    <i class="fas fa-key"></i> 修改密碼
-                </a>
-                <a class="nav-link" href="/admin/logout">
-                    <i class="fas fa-sign-out-alt"></i> 登出
-                </a>
-            </div>
         </nav>
+        <div class="sidebar-footer">
+            <a href="#" class="nav-link" data-section="password">修改密碼</a>
+            <a href="/admin/logout" class="nav-link">登出</a>
+        </div>
     </div>
 
     <!-- 主要內容區 -->
