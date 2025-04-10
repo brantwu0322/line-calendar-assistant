@@ -1209,22 +1209,27 @@ def admin_login():
 @app.route('/admin')
 def admin_dashboard():
     """管理員儀表板"""
+    logger.info('進入管理員儀表板')
     if not session.get('admin_logged_in'):
+        logger.warning('未登入嘗試訪問管理員儀表板')
         return redirect(url_for('admin_login'))
     
     search_term = request.args.get('search', '')
+    logger.info(f'搜尋詞：{search_term}')
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         
         # 獲取使用者列表
         if search_term:
+            logger.info('執行搜尋使用者列表的查詢')
             cursor.execute('''
                 SELECT * FROM users 
                 WHERE line_user_id LIKE ? OR google_email LIKE ?
                 ORDER BY created_at DESC
             ''', (f'%{search_term}%', f'%{search_term}%'))
         else:
+            logger.info('獲取所有使用者列表')
             cursor.execute('SELECT * FROM users ORDER BY created_at DESC')
         users = []
         for row in cursor.fetchall():
@@ -1243,6 +1248,7 @@ def admin_dashboard():
             users.append(user_dict)
         
         # 獲取管理員列表
+        logger.info('獲取管理員列表')
         cursor.execute('SELECT * FROM admins ORDER BY created_at DESC')
         admins = []
         for row in cursor.fetchall():
@@ -1258,6 +1264,7 @@ def admin_dashboard():
         # 獲取總使用者數
         cursor.execute('SELECT COUNT(*) FROM users')
         total_users = cursor.fetchone()[0]
+        logger.info(f'總使用者數：{total_users}')
         
         return render_template('admin_dashboard.html', 
                              users=users, 
@@ -1287,7 +1294,9 @@ def admin_logout():
 @app.route('/admin/change_password', methods=['POST'])
 def change_admin_password():
     """修改管理員密碼"""
+    logger.info('進入修改管理員密碼功能')
     if not session.get('admin_logged_in'):
+        logger.warning('未登入嘗試修改密碼')
         return jsonify({'success': False, 'message': '請先登入'}), 401
     
     current_password = request.form.get('current_password')
@@ -1295,28 +1304,35 @@ def change_admin_password():
     confirm_password = request.form.get('confirm_password')
     
     if not all([current_password, new_password, confirm_password]):
+        logger.warning('密碼修改請求缺少必要欄位')
         return jsonify({'success': False, 'message': '所有欄位都必須填寫'}), 400
     
     if len(new_password) < 6:
+        logger.warning('新密碼長度不足')
         return jsonify({'success': False, 'message': '新密碼長度至少需要6個字符'}), 400
     
     if new_password != confirm_password:
+        logger.warning('新密碼與確認密碼不符')
         return jsonify({'success': False, 'message': '新密碼與確認密碼不符'}), 400
     
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         # 驗證當前密碼
+        logger.info('驗證當前密碼')
         cursor.execute('SELECT username, password FROM admins WHERE username = ?', (session.get('admin_username'),))
         admin = cursor.fetchone()
         if not admin or not check_password_hash(admin['password'], current_password):
+            logger.warning('當前密碼驗證失敗')
             return jsonify({'success': False, 'message': '當前密碼錯誤'}), 400
         
         # 更新密碼
+        logger.info('更新管理員密碼')
         new_password_hash = generate_password_hash(new_password)
         cursor.execute('UPDATE admins SET password = ? WHERE username = ?',
                       (new_password_hash, admin['username']))
         conn.commit()
+        logger.info('密碼已成功更新')
         return jsonify({'success': True, 'message': '密碼已成功更新'})
     except Exception as e:
         logger.error(f'更新管理員密碼時發生錯誤: {str(e)}')
