@@ -322,6 +322,7 @@ def init_db(conn):
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
+    logger.info('已創建用戶表')
     
     # 創建行程記錄表
     c.execute('''
@@ -336,6 +337,7 @@ def init_db(conn):
         FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
     )
     ''')
+    logger.info('已創建行程記錄表')
     
     # 創建管理員表
     c.execute('''
@@ -346,6 +348,7 @@ def init_db(conn):
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
+    logger.info('已創建管理員表')
     
     # 創建訂單表
     c.execute('''
@@ -359,10 +362,14 @@ def init_db(conn):
         FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
     )
     ''')
+    logger.info('已創建訂單表')
     
     # 檢查是否已存在管理員帳號
     c.execute('SELECT COUNT(*) FROM admins')
-    if c.fetchone()[0] == 0:
+    admin_count = c.fetchone()[0]
+    logger.info(f'現有管理員帳號數量: {admin_count}')
+    
+    if admin_count == 0:
         # 創建默認管理員帳號
         default_username = 'admin'
         default_password = generate_password_hash('admin')
@@ -1258,8 +1265,11 @@ def admin_dashboard():
             # 確保日期時間格式正確
             if admin_dict.get('created_at'):
                 try:
-                    admin_dict['created_at'] = datetime.fromisoformat(admin_dict['created_at']).strftime('%Y-%m-%d %H:%M:%S')
-                except (ValueError, TypeError):
+                    # 確保將字串轉換為 datetime 對象
+                    created_at_dt = parser.parse(admin_dict['created_at'])
+                    admin_dict['created_at'] = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
+                except (ValueError, TypeError) as e:
+                    logger.error(f'日期格式化錯誤: {str(e)}')
                     admin_dict['created_at'] = 'N/A'
             admins.append(admin_dict)
         
@@ -1329,8 +1339,10 @@ def change_admin_password():
             return jsonify({'success': False, 'message': '當前密碼錯誤'}), 400
         
         # 更新密碼
-        logger.info('更新管理員密碼')
+        logger.info('開始更新密碼')
         new_password_hash = generate_password_hash(new_password)
+        logger.info(f'更新的管理員用戶名: {admin["username"]}')
+        logger.info(f'新密碼哈希: {new_password_hash}')
         cursor.execute('UPDATE admins SET password = ? WHERE username = ?',
                       (new_password_hash, admin['username']))
         conn.commit()
