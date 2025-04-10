@@ -1741,6 +1741,11 @@ def handle_event_creation(user_id, event_info):
         logger.error(f"建立行程時發生錯誤：{str(e)}")
         return "建立行程時發生錯誤，請稍後再試。"
 
+@app.route('/authorize')
+def authorize():
+    """Google 日曆授權頁面"""
+    return render_template('authorize.html')
+
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
     logger.info(f"LINE_CHANNEL_ACCESS_TOKEN: {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')[:10]}...")
