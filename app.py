@@ -564,7 +564,8 @@ def get_google_calendar_service(line_user_id):
             auth_url, _ = flow.authorization_url(
                 access_type='offline',
                 include_granted_scopes='true',
-                state=line_user_id
+                state=line_user_id,
+                redirect_uri=os.getenv('GOOGLE_REDIRECT_URI')
             )
             return None, auth_url
 
@@ -599,7 +600,8 @@ def handle_google_auth(line_user_id):
         auth_url, _ = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
-            state=line_user_id
+            state=line_user_id,
+            redirect_uri=os.getenv('GOOGLE_REDIRECT_URI')
         )
         return auth_url
     except Exception as e:
@@ -1217,39 +1219,53 @@ def admin_login():
     
     return render_template('admin_login.html')
 
-@app.route('/admin/dashboard')
+@app.route('/admin')
 def admin_dashboard():
     """管理員儀表板"""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('admin_login'))
+    
+    search_term = request.args.get('search', '')
+    conn = get_db_connection()
     try:
-        if not session.get('admin_logged_in'):
-            return redirect(url_for('admin_login'))
-        
-        # 獲取搜尋參數
-        search_term = request.args.get('search')
+        cursor = conn.cursor()
         
         # 獲取使用者列表
-        users = get_all_users(search_term=search_term)
+        if search_term:
+            cursor.execute('''
+                SELECT * FROM users 
+                WHERE line_user_id LIKE ? OR google_email LIKE ?
+                ORDER BY created_at DESC
+            ''', (f'%{search_term}%', f'%{search_term}%'))
+        else:
+            cursor.execute('SELECT * FROM users ORDER BY created_at DESC')
+        users = [dict(row) for row in cursor.fetchall()]
         
         # 獲取管理員列表
-        admins = get_all_admins()
+        cursor.execute('SELECT * FROM admins ORDER BY created_at DESC')
+        admins = [dict(row) for row in cursor.fetchall()]
         
-        # 獲取當前管理員用戶名
-        current_admin = session.get('admin_username')
+        # 獲取總使用者數
+        cursor.execute('SELECT COUNT(*) FROM users')
+        total_users = cursor.fetchone()[0]
         
-        # 計算總使用者數
-        total_users = len(users)
-        
-        # 渲染模板
         return render_template('admin_dashboard.html', 
-                            users=users,
-                            admins=admins,
-                            current_admin=current_admin,
-                            total_users=total_users,
-                            search_term=search_term)
+                             users=users, 
+                             admins=admins, 
+                             total_users=total_users,
+                             search_term=search_term,
+                             current_admin=session.get('admin_username'))
     except Exception as e:
-        logger.error(f"管理員儀表板載入時發生錯誤: {str(e)}")
-        logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
-        return render_template('error.html', error="載入管理員儀表板時發生錯誤，請稍後再試。")
+        logger.error(f'獲取管理員儀表板數據時發生錯誤: {str(e)}')
+        flash('獲取數據時發生錯誤', 'error')
+        return render_template('admin_dashboard.html', 
+                             users=[], 
+                             admins=[], 
+                             total_users=0,
+                             search_term=search_term,
+                             current_admin=session.get('admin_username'))
+    finally:
+        conn.close()
 
 @app.route('/admin/logout')
 def admin_logout():
