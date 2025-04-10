@@ -547,17 +547,19 @@ def get_google_calendar_service(line_user_id=None):
     try:
         if not line_user_id:
             logger.error("缺少 line_user_id")
-            return None
+            return None, "缺少用戶 ID"
             
         credentials = get_user_credentials(line_user_id)
         if not credentials:
             logger.info(f"需要重新授權: {line_user_id}")
-            return None
+            auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
+            return None, auth_url
             
-        return build('calendar', 'v3', credentials=credentials)
+        service = build('calendar', 'v3', credentials=credentials)
+        return service, None
     except Exception as e:
         logger.error(f"建立 Google Calendar 服務時發生錯誤: {str(e)}")
-        return None
+        return None, str(e)
 
 # OpenAI API 設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
