@@ -381,8 +381,8 @@
             if (!confirm('確定要刪除此管理員嗎？')) return;
 
             try {
-                const response = await fetch(`/admin/delete_admin/${username}`, {
-                    method: 'DELETE'
+                const response = await fetch(`/admin/delete/${username}`, {
+                    method: 'POST'
                 });
 
                 const data = await response.json();
