@@ -1226,11 +1226,34 @@ def admin_dashboard():
             ''', (f'%{search_term}%', f'%{search_term}%'))
         else:
             cursor.execute('SELECT * FROM users ORDER BY created_at DESC')
-        users = [dict(row) for row in cursor.fetchall()]
+        users = []
+        for row in cursor.fetchall():
+            user_dict = dict(row)
+            # 確保日期時間格式正確
+            if user_dict.get('created_at'):
+                try:
+                    user_dict['created_at'] = datetime.fromisoformat(user_dict['created_at']).strftime('%Y-%m-%d %H:%M:%S')
+                except (ValueError, TypeError):
+                    user_dict['created_at'] = 'N/A'
+            if user_dict.get('updated_at'):
+                try:
+                    user_dict['updated_at'] = datetime.fromisoformat(user_dict['updated_at']).strftime('%Y-%m-%d %H:%M:%S')
+                except (ValueError, TypeError):
+                    user_dict['updated_at'] = 'N/A'
+            users.append(user_dict)
         
         # 獲取管理員列表
         cursor.execute('SELECT * FROM admins ORDER BY created_at DESC')
-        admins = [dict(row) for row in cursor.fetchall()]
+        admins = []
+        for row in cursor.fetchall():
+            admin_dict = dict(row)
+            # 確保日期時間格式正確
+            if admin_dict.get('created_at'):
+                try:
+                    admin_dict['created_at'] = datetime.fromisoformat(admin_dict['created_at']).strftime('%Y-%m-%d %H:%M:%S')
+                except (ValueError, TypeError):
+                    admin_dict['created_at'] = 'N/A'
+            admins.append(admin_dict)
         
         # 獲取總使用者數
         cursor.execute('SELECT COUNT(*) FROM users')
