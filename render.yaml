@@ -3,17 +3,25 @@ services:
     name: line-calendar-assistant
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:10000 --timeout 120
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
+    startCommand: python app.py
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.18
-      - key: PORT
-        value: 10000
-      - key: PYTHONUNBUFFERED
-        value: "true"
-      - key: RENDER_DB_PATH
-        value: /data 
+        value: 3.9.0
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: data
+      mountPath: /opt/render/project/src
+      sizeGB: 1 

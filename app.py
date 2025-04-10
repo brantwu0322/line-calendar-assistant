@@ -542,24 +542,69 @@ def save_user_credentials(conn, line_user_id, credentials):
         logger.error(f"儲存用戶憑證時發生錯誤: {str(e)}")
         raise
 
-def get_google_calendar_service(line_user_id=None):
-    """獲取 Google Calendar 服務實例"""
+def get_google_calendar_service(line_user_id):
+    """獲取 Google Calendar 服務"""
     try:
-        if not line_user_id:
-            logger.error("缺少 line_user_id")
-            return None, "缺少用戶 ID"
-            
+        # 檢查是否已有憑證
         credentials = get_user_credentials(line_user_id)
         if not credentials:
-            logger.info(f"需要重新授權: {line_user_id}")
-            auth_url = url_for('authorize', line_user_id=line_user_id, _external=True)
+            # 如果沒有憑證，返回授權 URL
+            flow = InstalledAppFlow.from_client_config(
+                {
+                    "installed": {
+                        "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+                        "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+                        "redirect_uris": [os.getenv('GOOGLE_REDIRECT_URI')],
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token"
+                    }
+                },
+                ['https://www.googleapis.com/auth/calendar']
+            )
+            auth_url, _ = flow.authorization_url(
+                access_type='offline',
+                include_granted_scopes='true',
+                state=line_user_id
+            )
             return None, auth_url
-            
+
+        # 使用憑證創建服務
         service = build('calendar', 'v3', credentials=credentials)
         return service, None
     except Exception as e:
-        logger.error(f"建立 Google Calendar 服務時發生錯誤: {str(e)}")
-        return None, str(e)
+        logger.error(f"Google Calendar 服務錯誤: {str(e)}")
+        return None, None
+
+def handle_google_auth(line_user_id):
+    """處理 Google 授權"""
+    try:
+        # 檢查是否已有憑證
+        credentials = get_user_credentials(line_user_id)
+        if credentials:
+            return None
+
+        # 創建 OAuth 流程
+        flow = InstalledAppFlow.from_client_config(
+            {
+                "installed": {
+                    "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+                    "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+                    "redirect_uris": [os.getenv('GOOGLE_REDIRECT_URI')],
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token"
+                }
+            },
+            ['https://www.googleapis.com/auth/calendar']
+        )
+        auth_url, _ = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            state=line_user_id
+        )
+        return auth_url
+    except Exception as e:
+        logger.error(f"Google 授權錯誤: {str(e)}")
+        return None
 
 # OpenAI API 設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
@@ -1743,8 +1788,16 @@ def handle_event_creation(user_id, event_info):
 
 @app.route('/authorize')
 def authorize():
-    """Google 日曆授權頁面"""
-    return render_template('authorize.html')
+    """授權頁面"""
+    line_user_id = request.args.get('line_user_id')
+    if not line_user_id:
+        return "缺少 line_user_id 參數", 400
+
+    auth_url = handle_google_auth(line_user_id)
+    if not auth_url:
+        return "無法生成授權 URL", 500
+
+    return render_template('authorize.html', auth_url=auth_url)
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
