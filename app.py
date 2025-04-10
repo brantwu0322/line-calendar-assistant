@@ -1249,11 +1249,15 @@ def admin_dashboard():
         # 獲取當前管理員用戶名
         current_admin = session.get('admin_username')
         
+        # 計算總使用者數
+        total_users = len(users)
+        
         # 渲染模板
         return render_template('admin_dashboard.html', 
                             users=users,
                             admins=admins,
                             current_admin=current_admin,
+                            total_users=total_users,
                             search_term=search_term)
     except Exception as e:
         logger.error(f"管理員儀表板載入時發生錯誤: {str(e)}")
@@ -1535,7 +1539,7 @@ def handle_event_query(user_id, text):
             return "請先進行 Google Calendar 授權才能查詢行程。\n授權網址：" + get_authorization_url()
 
         # 建立 Google Calendar 服務
-        service = build_calendar_service(credentials)
+        service = build('calendar', 'v3', credentials=credentials)
 
         # 解析日期
         date_str = text.split()[1].replace("的行程", "")
@@ -1570,8 +1574,8 @@ def handle_event_query(user_id, text):
             end = event['end'].get('dateTime', event['end'].get('date'))
             
             if 'T' in start:  # 檢查是否包含時間
-                start_dt = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
-                end_dt = datetime.datetime.fromisoformat(end.replace('Z', '+00:00'))
+                start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
                 time_str = f"⏰ {start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}"
             else:
                 time_str = "📅 全天"
