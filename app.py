@@ -1234,6 +1234,7 @@ def admin_dashboard():
         users = []
         for row in cursor.fetchall():
             user_dict = dict(row)
+            logger.debug(f'使用者資料：{user_dict}')  # 添加詳細日誌
             # 確保日期時間格式正確
             if user_dict.get('created_at'):
                 try:
@@ -1253,6 +1254,7 @@ def admin_dashboard():
         admins = []
         for row in cursor.fetchall():
             admin_dict = dict(row)
+            logger.debug(f'管理員資料：{admin_dict}')  # 添加詳細日誌
             # 確保日期時間格式正確
             if admin_dict.get('created_at'):
                 try:
