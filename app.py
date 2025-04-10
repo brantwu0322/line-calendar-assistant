@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # 設定資料庫路徑
-DB_PATH = os.path.join(os.getenv('RENDER_DB_PATH', os.path.dirname(os.path.abspath(__file__))), 'users.db')
+DB_PATH = os.path.join(os.getenv('RENDER_DB_PATH', os.path.dirname(os.path.abspath(__file__))), 'data', 'users.db')
 logger.info(f"Database path: {DB_PATH}")
 
 # 確保資料庫目錄存在
@@ -306,79 +306,72 @@ def require_authorization(func):
 @with_db_connection
 def init_db(conn):
     """初始化資料庫"""
-    c = conn.cursor()
-    
-    # 創建用戶表（新增 auth_state 欄位）
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        line_user_id TEXT UNIQUE NOT NULL,
-        google_credentials TEXT,
-        google_email TEXT,
-        auth_state TEXT,
-        subscription_status TEXT DEFAULT 'free',
-        subscription_end_date TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
-    logger.info('已創建用戶表')
-    
-    # 創建行程記錄表
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        line_user_id TEXT NOT NULL,
-        event_id TEXT NOT NULL,
-        summary TEXT NOT NULL,
-        start_time TEXT NOT NULL,
-        end_time TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
-    )
-    ''')
-    logger.info('已創建行程記錄表')
-    
-    # 創建管理員表
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS admins (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
-    logger.info('已創建管理員表')
-    
-    # 創建訂單表
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id TEXT UNIQUE NOT NULL,
-        line_user_id TEXT NOT NULL,
-        amount INTEGER NOT NULL,
-        status TEXT DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
-    )
-    ''')
-    logger.info('已創建訂單表')
-    
-    # 檢查是否已存在管理員帳號
-    c.execute('SELECT COUNT(*) FROM admins')
-    admin_count = c.fetchone()[0]
-    logger.info(f'現有管理員帳號數量: {admin_count}')
-    
-    if admin_count == 0:
-        # 創建默認管理員帳號
-        default_username = 'admin'
-        default_password = generate_password_hash('admin')
-        c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
-                 (default_username, default_password))
-        logger.info('已創建默認管理員帳號')
-    
-    conn.commit()
-    logger.info('資料庫初始化完成')
+    try:
+        cursor = conn.cursor()
+        
+        # 創建用戶表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            line_user_id TEXT UNIQUE NOT NULL,
+            google_credentials TEXT,
+            google_email TEXT,
+            auth_state TEXT,
+            subscription_status TEXT DEFAULT 'free',
+            subscription_end_date TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        logger.info("已創建用戶表")
+        
+        # 創建行程記錄表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            line_user_id TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
+        )
+        ''')
+        logger.info("已創建行程記錄表")
+        
+        # 創建管理員表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS admins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        logger.info("已創建管理員表")
+        
+        # 檢查是否已存在管理員帳號
+        cursor.execute('SELECT COUNT(*) FROM admins')
+        admin_count = cursor.fetchone()[0]
+        logger.info(f"現有管理員帳號數量：{admin_count}")
+        
+        if admin_count == 0:
+            # 創建默認管理員帳號
+            default_username = 'admin'
+            default_password = generate_password_hash('admin')
+            cursor.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
+                         (default_username, default_password))
+            logger.info('已創建默認管理員帳號')
+        
+        conn.commit()
+        logger.info("資料庫初始化成功")
+    except Exception as e:
+        logger.error(f"資料庫初始化失敗：{str(e)}")
+        logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
+        if conn:
+            conn.rollback()
+        raise
 
 @with_db_connection
 def get_user_status(conn, line_user_id):

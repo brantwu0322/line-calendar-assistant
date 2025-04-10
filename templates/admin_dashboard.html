@@ -198,11 +198,13 @@
                                 {% for admin in admins %}
                                 <tr>
                                     <td>{{ admin.username }}</td>
-                                    <td>{{ admin.created_at.strftime('%Y-%m-%d') }}</td>
+                                    <td>{{ admin.created_at if admin.created_at is string else admin.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                                     <td>
+                                        {% if admin.username != current_admin %}
                                         <button class="btn btn-danger btn-sm" onclick="deleteAdmin('{{ admin.username }}')">
                                             刪除
                                         </button>
+                                        {% endif %}
                                     </td>
                                 </tr>
                                 {% endfor %}
