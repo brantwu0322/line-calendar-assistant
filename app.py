@@ -559,7 +559,7 @@ def get_google_calendar_service(line_user_id):
                 access_type='offline',
                 include_granted_scopes='true',
                 state=line_user_id,
-                redirect_uri=os.getenv('GOOGLE_REDIRECT_URI')
+                redirect_uri=OAUTH_REDIRECT_URI
             )
             return None, auth_url
 
@@ -586,16 +586,16 @@ def handle_google_auth(line_user_id):
                     "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
                     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                     "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [os.getenv('GOOGLE_REDIRECT_URI')]
+                    "redirect_uris": [OAUTH_REDIRECT_URI]
                 }
             },
-            ['https://www.googleapis.com/auth/calendar']
+            SCOPES
         )
         auth_url, _ = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
             state=line_user_id,
-            redirect_uri=os.getenv('GOOGLE_REDIRECT_URI')
+            redirect_uri=OAUTH_REDIRECT_URI
         )
         return auth_url
     except Exception as e:
