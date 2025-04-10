@@ -1245,12 +1245,14 @@ def admin_dashboard():
             # 確保日期時間格式正確
             if user_dict.get('created_at'):
                 try:
-                    user_dict['created_at'] = datetime.fromisoformat(user_dict['created_at']).strftime('%Y-%m-%d %H:%M:%S')
+                    created_at_dt = datetime.strptime(user_dict['created_at'], '%Y-%m-%d %H:%M:%S')
+                    user_dict['created_at'] = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
                 except (ValueError, TypeError):
                     user_dict['created_at'] = 'N/A'
             if user_dict.get('updated_at'):
                 try:
-                    user_dict['updated_at'] = datetime.fromisoformat(user_dict['updated_at']).strftime('%Y-%m-%d %H:%M:%S')
+                    updated_at_dt = datetime.strptime(user_dict['updated_at'], '%Y-%m-%d %H:%M:%S')
+                    user_dict['updated_at'] = updated_at_dt.strftime('%Y-%m-%d %H:%M:%S')
                 except (ValueError, TypeError):
                     user_dict['updated_at'] = 'N/A'
             users.append(user_dict)
@@ -1265,8 +1267,7 @@ def admin_dashboard():
             # 確保日期時間格式正確
             if admin_dict.get('created_at'):
                 try:
-                    # 確保將字串轉換為 datetime 對象
-                    created_at_dt = parser.parse(admin_dict['created_at'])
+                    created_at_dt = datetime.strptime(str(admin_dict['created_at']), '%Y-%m-%d %H:%M:%S')
                     admin_dict['created_at'] = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
                 except (ValueError, TypeError) as e:
                     logger.error(f'日期格式化錯誤: {str(e)}')
@@ -1286,6 +1287,7 @@ def admin_dashboard():
                              current_admin=session.get('admin_username'))
     except Exception as e:
         logger.error(f'獲取管理員儀表板數據時發生錯誤: {str(e)}')
+        logger.error(f'詳細錯誤資訊：\n{traceback.format_exc()}')
         flash('獲取數據時發生錯誤', 'error')
         return render_template('admin_dashboard.html', 
                              users=[], 
