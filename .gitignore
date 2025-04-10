@@ -34,4 +34,8 @@ credentials.json
 flask_session/
 users.db
 *.db
-Thumbs.db 
+Thumbs.db
+
+# New lines
+table-version -- *
+tatus 
