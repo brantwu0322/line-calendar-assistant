@@ -1224,6 +1224,9 @@ def change_admin_password():
     if not all([current_password, new_password, confirm_password]):
         return jsonify({'success': False, 'message': '所有欄位都必須填寫'}), 400
     
+    if len(new_password) < 6:
+        return jsonify({'success': False, 'message': '新密碼長度至少需要6個字符'}), 400
+    
     if new_password != confirm_password:
         return jsonify({'success': False, 'message': '新密碼與確認密碼不符'}), 400
     
@@ -1353,6 +1356,9 @@ def add_admin():
     
     if not username or not password:
         return jsonify({'success': False, 'message': '使用者名稱和密碼都必須填寫'}), 400
+    
+    if len(password) < 6:
+        return jsonify({'success': False, 'message': '密碼長度至少需要6個字符'}), 400
     
     conn = get_db_connection()
     try:

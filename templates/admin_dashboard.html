@@ -131,12 +131,16 @@
                                 <tbody>
                                     {% for user in users %}
                                     <tr>
-                                        <td>{{ user.line_id }}</td>
+                                        <td>{{ user.line_user_id }}</td>
                                         <td>{{ user.google_email or '未連結' }}</td>
-                                        <td>{{ '已訂閱' if user.is_subscribed else '未訂閱' }}</td>
-                                        <td>{{ user.subscription_end.strftime('%Y-%m-%d') if user.subscription_end else '無' }}</td>
                                         <td>
-                                            <button class="btn btn-danger btn-sm" onclick="deleteUser('{{ user.line_id }}')">
+                                            <span class="subscription-status {% if user.subscription_status == 'premium' %}status-premium{% else %}status-free{% endif %}">
+                                                {{ '已訂閱' if user.subscription_status == 'premium' else '未訂閱' }}
+                                            </span>
+                                        </td>
+                                        <td>{{ user.subscription_end_date.strftime('%Y-%m-%d') if user.subscription_end_date else '無' }}</td>
+                                        <td>
+                                            <button class="btn btn-danger btn-sm" onclick="deleteUser('{{ user.line_user_id }}')">
                                                 刪除
                                             </button>
                                         </td>
@@ -274,21 +278,30 @@
             const newPassword = document.getElementById('new-password').value;
             const confirmPassword = document.getElementById('confirm-password').value;
 
+            if (!currentPassword || !newPassword || !confirmPassword) {
+                alert('請填寫所有欄位');
+                return;
+            }
+
             if (newPassword !== confirmPassword) {
                 alert('新密碼與確認密碼不符');
                 return;
             }
 
+            if (newPassword.length < 6) {
+                alert('新密碼長度至少需要6個字符');
+                return;
+            }
+
             try {
+                const formData = new FormData();
+                formData.append('current_password', currentPassword);
+                formData.append('new_password', newPassword);
+                formData.append('confirm_password', confirmPassword);
+
                 const response = await fetch('/admin/change_password', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        current_password: currentPassword,
-                        new_password: newPassword
-                    })
+                    body: formData
                 });
 
                 const data = await response.json();
@@ -299,6 +312,7 @@
                     alert(data.message || '密碼修改失敗');
                 }
             } catch (error) {
+                console.error('Error:', error);
                 alert('發生錯誤，請稍後再試');
             }
         });
@@ -329,16 +343,24 @@
             const username = document.getElementById('admin-username').value;
             const password = document.getElementById('admin-password').value;
 
+            if (!username || !password) {
+                alert('請填寫所有欄位');
+                return;
+            }
+
+            if (password.length < 6) {
+                alert('密碼長度至少需要6個字符');
+                return;
+            }
+
             try {
-                const response = await fetch('/admin/add_admin', {
+                const formData = new FormData();
+                formData.append('username', username);
+                formData.append('password', password);
+
+                const response = await fetch('/admin/add', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        username: username,
-                        password: password
-                    })
+                    body: formData
                 });
 
                 const data = await response.json();
@@ -349,6 +371,7 @@
                     alert(data.message || '新增失敗');
                 }
             } catch (error) {
+                console.error('Error:', error);
                 alert('發生錯誤，請稍後再試');
             }
         }
