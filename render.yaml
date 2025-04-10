@@ -7,21 +7,38 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.0
-      - key: LINE_CHANNEL_ACCESS_TOKEN
-        sync: false
+      - key: FLASK_SECRET_KEY
+        value: your-secret-key-here
       - key: LINE_CHANNEL_SECRET
-        sync: false
+        fromService:
+          name: line-bot
+          type: secret
+          property: channel-secret
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        fromService:
+          name: line-bot
+          type: secret
+          property: channel-access-token
       - key: GOOGLE_CLIENT_ID
-        sync: false
+        fromService:
+          name: google-oauth
+          type: secret
+          property: client-id
       - key: GOOGLE_CLIENT_SECRET
-        sync: false
+        fromService:
+          name: google-oauth
+          type: secret
+          property: client-secret
       - key: GOOGLE_REDIRECT_URI
-        sync: false
-      - key: ADMIN_USERNAME
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
+        value: https://line-calendar-assistant.onrender.com/oauth2callback
+      - key: OPENAI_API_KEY
+        fromService:
+          name: openai
+          type: secret
+          property: api-key
+      - key: RENDER_DB_PATH
+        value: /opt/render/project/src/data
     disk:
       name: data
-      mountPath: /opt/render/project/src
+      mountPath: /opt/render/project/src/data
       sizeGB: 1 
