@@ -467,19 +467,32 @@ def get_all_users(conn, search_term=None):
 
 @with_db_connection
 def get_user_credentials(conn, line_user_id):
-    """獲取用戶認證"""
-    c = conn.cursor()
-    c.execute('SELECT google_credentials FROM users WHERE line_user_id = ?', (line_user_id,))
-    result = c.fetchone()
-    
-    if result and result[0]:
-        try:
-            creds_dict = json.loads(result[0])
-            return creds_dict
-        except json.JSONDecodeError:
-            logger.error(f"無法解析用戶 {line_user_id} 的憑證 JSON")
-            return None
-    return None
+    """從資料庫獲取用戶的 Google 憑證"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT google_credentials FROM users WHERE line_user_id = ?', (line_user_id,))
+        result = cursor.fetchone()
+        
+        if result and result['google_credentials']:
+            credentials_data = json.loads(result['google_credentials'])
+            credentials = Credentials.from_authorized_user_info(credentials_data)
+            
+            # 檢查憑證是否過期且可刷新
+            if credentials.expired and credentials.refresh_token:
+                try:
+                    credentials.refresh(Request())
+                    # 更新資料庫中的憑證
+                    save_user_credentials(conn, line_user_id, credentials)
+                    logger.info(f"憑證已刷新: {line_user_id}")
+                except Exception as e:
+                    logger.error(f"刷新憑證時發生錯誤: {str(e)}")
+                    return None
+            
+            return credentials
+        return None
+    except Exception as e:
+        logger.error(f"獲取用戶憑證時發生錯誤: {str(e)}")
+        return None
 
 def get_db_connection():
     """獲取資料庫連接"""
@@ -493,12 +506,10 @@ def get_db_connection():
 
 @with_db_connection
 def save_user_credentials(conn, line_user_id, credentials):
-    """保存用戶認證"""
+    """將用戶的 Google 憑證儲存到資料庫"""
     try:
-        cursor = conn.cursor()
-        
-        # 將憑證轉換為字典格式
-        creds_dict = {
+        # 將憑證轉換為可序列化的字典
+        credentials_dict = {
             'token': credentials.token,
             'refresh_token': credentials.refresh_token,
             'token_uri': credentials.token_uri,
@@ -507,119 +518,46 @@ def save_user_credentials(conn, line_user_id, credentials):
             'scopes': credentials.scopes
         }
         
-        # 檢查用戶是否已存在
-        cursor.execute('SELECT line_user_id FROM users WHERE line_user_id = ?', (line_user_id,))
-        user_exists = cursor.fetchone() is not None
+        # 將憑證資料轉換為 JSON 字串
+        credentials_json = json.dumps(credentials_dict)
         
-        if user_exists:
-            # 更新用戶資料，包括授權狀態
+        # 更新資料庫
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE users 
+            SET google_credentials = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE line_user_id = ?
+        ''', (credentials_json, line_user_id))
+        
+        if cursor.rowcount == 0:
+            # 如果用戶不存在，創建新記錄
             cursor.execute('''
-                UPDATE users 
-                SET google_credentials = ?,
-                    auth_state = 'authorized',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE line_user_id = ?
-            ''', (json.dumps(creds_dict), line_user_id))
-        else:
-            # 創建新用戶
-            cursor.execute('''
-                INSERT INTO users (
-                    line_user_id, 
-                    google_credentials, 
-                    auth_state,
-                    subscription_status, 
-                    subscription_end_date
-                )
-                VALUES (?, ?, 'authorized', 'free', NULL)
-            ''', (line_user_id, json.dumps(creds_dict)))
+                INSERT INTO users (line_user_id, google_credentials)
+                VALUES (?, ?)
+            ''', (line_user_id, credentials_json))
         
         conn.commit()
-        logger.info(f"已儲存用戶 {line_user_id} 的憑證")
-        return True
+        logger.info(f"憑證已儲存到資料庫: {line_user_id}")
     except Exception as e:
         logger.error(f"儲存用戶憑證時發生錯誤: {str(e)}")
-        conn.rollback()
         raise
 
 def get_google_calendar_service(line_user_id=None):
-    """取得使用者的 Google Calendar 服務"""
+    """獲取 Google Calendar 服務實例"""
     try:
         if not line_user_id:
-            return None, "未提供用戶 ID"
-
-        # 嘗試獲取用戶的憑證
-        creds_dict = get_user_credentials(line_user_id)
-        if not creds_dict:
-            # 如果沒有憑證，返回授權 URL
-            credentials_json = os.getenv('GOOGLE_CREDENTIALS')
-            if not credentials_json:
-                return None, "未設定 GOOGLE_CREDENTIALS 環境變數"
+            logger.error("缺少 line_user_id")
+            return None
             
-            try:
-                credentials_info = json.loads(credentials_json)
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-                    json.dump(credentials_info, temp_file)
-                    temp_file_path = temp_file.name
-                
-                logger.info(f"使用重定向 URI: {OAUTH_REDIRECT_URI}")
-                
-                # 設定 OAuth 2.0 流程
-                flow = Flow.from_client_secrets_file(
-                    temp_file_path,
-                    SCOPES,
-                    redirect_uri=OAUTH_REDIRECT_URI
-                )
-                os.unlink(temp_file_path)
-                
-                # 生成授權 URL，直接使用 line_user_id 作為 state
-                authorization_url, _ = flow.authorization_url(
-                    access_type='offline',
-                    include_granted_scopes='true',
-                    state=line_user_id
-                )
-                
-                logger.info(f"生成授權 URL: {authorization_url}")
-                return None, authorization_url
-                
-            except json.JSONDecodeError:
-                return None, "GOOGLE_CREDENTIALS 環境變數格式錯誤"
-            except Exception as e:
-                logger.error(f"初始化 Google Calendar 流程時發生錯誤：{str(e)}")
-                return None, f"無法初始化 Google Calendar 授權流程：{str(e)}"
-        
-        try:
-            # 使用憑證字典創建 Credentials 對象
-            credentials = Credentials(
-                token=creds_dict['token'],
-                refresh_token=creds_dict['refresh_token'],
-                token_uri=creds_dict['token_uri'],
-                client_id=creds_dict['client_id'],
-                client_secret=creds_dict['client_secret'],
-                scopes=creds_dict['scopes']
-            )
+        credentials = get_user_credentials(line_user_id)
+        if not credentials:
+            logger.info(f"需要重新授權: {line_user_id}")
+            return None
             
-            # 如果憑證過期，嘗試刷新
-            if credentials.expired and credentials.refresh_token:
-                try:
-                    credentials.refresh(Request())
-                    # 更新資料庫中的憑證
-                    save_user_credentials(line_user_id, credentials)
-                    logger.info(f"已刷新用戶 {line_user_id} 的憑證")
-                except Exception as e:
-                    logger.error(f"刷新憑證時發生錯誤：{str(e)}")
-                    # 如果刷新失敗，返回授權 URL
-                    return None, "憑證已過期，需要重新授權"
-            
-            # 建立服務
-            service = build('calendar', 'v3', credentials=credentials)
-            return service, None
-            
-        except Exception as e:
-            logger.error(f"取得 Google Calendar 服務時發生錯誤：{str(e)}")
-            return None, "Google Calendar 服務發生錯誤"
+        return build('calendar', 'v3', credentials=credentials)
     except Exception as e:
-        logger.error(f"Google Calendar 服務發生未預期錯誤：{str(e)}")
-        return None, f"系統錯誤：{str(e)}"
+        logger.error(f"建立 Google Calendar 服務時發生錯誤: {str(e)}")
+        return None
 
 # OpenAI API 設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
@@ -1330,81 +1268,66 @@ def delete_user():
 def oauth2callback(conn):
     """處理 Google OAuth 回調"""
     try:
-        # 獲取授權碼
+        # 獲取授權碼和狀態
         code = request.args.get('code')
         state = request.args.get('state')
         
-        if not code:
-            return "未收到授權碼", 400
-            
-        # 直接使用 state 作為 LINE 用戶 ID
+        if not code or not state:
+            logger.error("缺少必要的參數")
+            return "授權失敗：缺少必要的參數", 400
+        
+        # 從狀態參數中獲取 LINE 用戶 ID
         line_user_id = state
-        if not line_user_id:
-            return "無法識別用戶", 400
-            
+        
         # 獲取 Google OAuth 配置
-        credentials_json = os.getenv('GOOGLE_CREDENTIALS')
-        if not credentials_json:
-            return "未設定 Google 憑證", 500
-            
-        try:
-            credentials_info = json.loads(credentials_json)
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-                json.dump(credentials_info, temp_file)
-                temp_file_path = temp_file.name
-            
-            # 建立 OAuth 流程
-            flow = Flow.from_client_secrets_file(
-                temp_file_path,
-                SCOPES,
-                redirect_uri=OAUTH_REDIRECT_URI
-            )
-            os.unlink(temp_file_path)
-            
-            # 交換授權碼獲取憑證
-            flow.fetch_token(code=code)
-            credentials = flow.credentials
-            
-            # 儲存用戶憑證
-            save_user_credentials(line_user_id, credentials)
-            
-            # 使用 OAuth2 userinfo endpoint 獲取用戶資訊
-            userinfo_url = "https://www.googleapis.com/oauth2/v3/userinfo"
-            headers = {'Authorization': f'Bearer {credentials.token}'}
-            response = requests.get(userinfo_url, headers=headers)
-            
-            if response.status_code == 200:
-                user_info = response.json()
-                email = user_info.get('email')
-                
-                if email:
-                    # 更新用戶的 Google 電子郵件
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        UPDATE users 
-                        SET google_email = ?,
-                            auth_state = 'authorized',
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE line_user_id = ?
-                    ''', (email, line_user_id))
-                    conn.commit()
-                    
-                    return render_template('oauth_success.html')
-                else:
-                    return "無法獲取用戶電子郵件", 500
-            else:
-                return "無法獲取用戶資訊", 500
-            
-        except Exception as e:
-            logger.error(f"處理 OAuth 回調時發生錯誤：{str(e)}")
-            logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
-            conn.rollback()
-            return f"授權失敗：{str(e)}", 500
-            
+        client_id = os.getenv('GOOGLE_CLIENT_ID')
+        client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+        
+        if not client_id or not client_secret:
+            logger.error("缺少 Google OAuth 配置")
+            return "授權失敗：缺少必要的配置", 500
+        
+        # 創建 OAuth 流程
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [OAUTH_REDIRECT_URI]
+                }
+            },
+            scopes=SCOPES,
+            redirect_uri=OAUTH_REDIRECT_URI
+        )
+        
+        # 交換授權碼獲取憑證
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+        
+        # 儲存憑證
+        save_user_credentials(conn, line_user_id, credentials)
+        
+        # 獲取用戶信息
+        userinfo_service = build('oauth2', 'v2', credentials=credentials)
+        userinfo = userinfo_service.userinfo().get().execute()
+        google_email = userinfo.get('email')
+        
+        # 更新用戶的 Google 郵箱
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE users 
+            SET google_email = ? 
+            WHERE line_user_id = ?
+        ''', (google_email, line_user_id))
+        conn.commit()
+        
+        logger.info(f"Google 授權成功: {line_user_id}")
+        return "Google 日曆授權成功！您現在可以使用日曆功能了。"
     except Exception as e:
-        logger.error(f"OAuth 回調發生未預期錯誤：{str(e)}")
-        logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
-        return f"系統錯誤：{str(e)}", 500
+        logger.error(f"Google 授權回調處理失敗: {str(e)}")
+        return f"授權失敗：{str(e)}", 500
 
 @with_db_connection
 def get_all_admins(conn):
