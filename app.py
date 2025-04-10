@@ -551,12 +551,12 @@ def get_google_calendar_service(line_user_id):
             # 如果沒有憑證，返回授權 URL
             flow = InstalledAppFlow.from_client_config(
                 {
-                    "installed": {
+                    "web": {
                         "client_id": os.getenv('GOOGLE_CLIENT_ID'),
                         "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
-                        "redirect_uris": [os.getenv('GOOGLE_REDIRECT_URI')],
                         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                        "token_uri": "https://oauth2.googleapis.com/token"
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                        "redirect_uris": [os.getenv('GOOGLE_REDIRECT_URI')]
                     }
                 },
                 ['https://www.googleapis.com/auth/calendar']
@@ -586,12 +586,12 @@ def handle_google_auth(line_user_id):
         # 創建 OAuth 流程
         flow = InstalledAppFlow.from_client_config(
             {
-                "installed": {
+                "web": {
                     "client_id": os.getenv('GOOGLE_CLIENT_ID'),
                     "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
-                    "redirect_uris": [os.getenv('GOOGLE_REDIRECT_URI')],
                     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token"
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [os.getenv('GOOGLE_REDIRECT_URI')]
                 }
             },
             ['https://www.googleapis.com/auth/calendar']
@@ -1338,8 +1338,9 @@ def oauth2callback(conn):
         # 獲取 Google OAuth 配置
         client_id = os.getenv('GOOGLE_CLIENT_ID')
         client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+        redirect_uri = os.getenv('GOOGLE_REDIRECT_URI')
         
-        if not client_id or not client_secret:
+        if not all([client_id, client_secret, redirect_uri]):
             logger.error("缺少 Google OAuth 配置")
             return "授權失敗：缺少必要的配置", 500
         
@@ -1351,11 +1352,11 @@ def oauth2callback(conn):
                     "client_secret": client_secret,
                     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                     "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [OAUTH_REDIRECT_URI]
+                    "redirect_uris": [redirect_uri]
                 }
             },
-            scopes=SCOPES,
-            redirect_uri=OAUTH_REDIRECT_URI
+            scopes=['https://www.googleapis.com/auth/calendar'],
+            redirect_uri=redirect_uri
         )
         
         # 交換授權碼獲取憑證
