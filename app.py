@@ -1438,6 +1438,12 @@ def authorize():
 
         try:
             credentials_data = json.loads(google_credentials)
+            # 驗證必要的欄位是否存在
+            required_fields = ['web', 'client_id', 'client_secret', 'redirect_uris']
+            for field in required_fields:
+                if field not in credentials_data:
+                    logger.error(f"Google OAuth 配置缺少必要欄位: {field}")
+                    return "系統配置錯誤", 500
         except json.JSONDecodeError:
             logger.error("Google OAuth 配置格式錯誤")
             return "系統配置錯誤", 500
@@ -1453,13 +1459,13 @@ def authorize():
         authorization_url, state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
-            prompt='consent',
-            redirect_uri=OAUTH_REDIRECT_URI  # 明確指定 redirect_uri
+            prompt='consent'
         )
 
         # 儲存 state 和 line_user_id
         session['state'] = state
         session['line_user_id'] = line_user_id
+        session.permanent = True  # 設定 session 為永久有效
 
         logger.info(f"重定向到授權 URL: {authorization_url}")
         return redirect(authorization_url)
@@ -1477,8 +1483,8 @@ def oauth2callback():
         state = request.args.get('state')
         stored_state = session.get('state')
         
-        if not state or state != stored_state:
-            logger.error("State 驗證失敗")
+        if not state or not stored_state or state != stored_state:
+            logger.error(f"State 驗證失敗: state={state}, stored_state={stored_state}")
             return "授權失敗：安全驗證錯誤", 400
 
         # 獲取 line_user_id
@@ -1515,6 +1521,7 @@ def oauth2callback():
             service = build('oauth2', 'v2', credentials=credentials)
             user_info = service.userinfo().get().execute()
             google_email = user_info.get('email')
+            logger.info(f"成功獲取 Google 帳號資訊: {google_email}")
         except Exception as e:
             logger.error(f"獲取 Google 帳號資訊失敗: {str(e)}")
             google_email = None
