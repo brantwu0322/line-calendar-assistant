@@ -73,48 +73,46 @@ try:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # 創建用戶表
+    # 創建 users 表
     c.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        line_user_id TEXT UNIQUE NOT NULL,
-        google_credentials TEXT,
-        google_email TEXT,
-        auth_state TEXT,
-        subscription_status TEXT DEFAULT 'free',
-        subscription_end_date TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
+        CREATE TABLE IF NOT EXISTS users (
+            line_user_id TEXT PRIMARY KEY,
+            google_credentials TEXT,
+            google_email TEXT,
+            status TEXT DEFAULT 'free',
+            subscription_end_date TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
     ''')
+    logger.info("users 表已創建或已存在")
     
-    # 創建行程記錄表
+    # 創建 events 表
     c.execute('''
-    CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        line_user_id TEXT NOT NULL,
-        event_id TEXT NOT NULL,
-        summary TEXT NOT NULL,
-        start_time TEXT NOT NULL,
-        end_time TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
-    )
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            line_user_id TEXT,
+            event_id TEXT,
+            event_data TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
+        )
     ''')
+    logger.info("events 表已創建或已存在")
     
-    # 創建管理員表
+    # 創建 admins 表
     c.execute('''
-    CREATE TABLE IF NOT EXISTS admins (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
+        CREATE TABLE IF NOT EXISTS admins (
+            username TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
     ''')
+    logger.info("admins 表已創建或已存在")
     
-    # 檢查是否已存在管理員帳號
-    c.execute('SELECT COUNT(*) FROM admins')
-    if c.fetchone()[0] == 0:
+    # 檢查資料庫文件是否為新創建的
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='admins'")
+    if c.fetchone() is None:
         # 創建默認管理員帳號
         default_username = 'admin'
         default_password = generate_password_hash('admin')
@@ -307,70 +305,63 @@ def require_authorization(func):
 def init_db(conn):
     """初始化資料庫"""
     try:
-        cursor = conn.cursor()
+        c = conn.cursor()
         
-        # 創建用戶表
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            line_user_id TEXT UNIQUE NOT NULL,
-            google_credentials TEXT,
-            google_email TEXT,
-            auth_state TEXT,
-            subscription_status TEXT DEFAULT 'free',
-            subscription_end_date TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
+        # 創建 users 表
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                line_user_id TEXT PRIMARY KEY,
+                google_credentials TEXT,
+                google_email TEXT,
+                status TEXT DEFAULT 'free',
+                subscription_end_date TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
         ''')
-        logger.info("已創建用戶表")
+        logger.info("users 表已創建或已存在")
         
-        # 創建行程記錄表
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            line_user_id TEXT NOT NULL,
-            event_id TEXT NOT NULL,
-            summary TEXT NOT NULL,
-            start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
-        )
+        # 創建 events 表
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                line_user_id TEXT,
+                event_id TEXT,
+                event_data TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
+            )
         ''')
-        logger.info("已創建行程記錄表")
+        logger.info("events 表已創建或已存在")
         
-        # 創建管理員表
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS admins (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
+        # 創建 admins 表
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS admins (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
         ''')
-        logger.info("已創建管理員表")
+        logger.info("admins 表已創建或已存在")
         
-        # 檢查是否已存在管理員帳號
-        cursor.execute('SELECT COUNT(*) FROM admins')
-        admin_count = cursor.fetchone()[0]
-        logger.info(f"現有管理員帳號數量：{admin_count}")
-        
-        if admin_count == 0:
+        # 檢查資料庫文件是否為新創建的
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='admins'")
+        if c.fetchone() is None:
             # 創建默認管理員帳號
             default_username = 'admin'
             default_password = generate_password_hash('admin')
-            cursor.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
-                         (default_username, default_password))
+            c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
+                     (default_username, default_password))
             logger.info('已創建默認管理員帳號')
         
         conn.commit()
+        conn.close()
         logger.info("資料庫初始化成功")
     except Exception as e:
         logger.error(f"資料庫初始化失敗：{str(e)}")
         logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
         if conn:
-            conn.rollback()
+            conn.close()
         raise
 
 @with_db_connection
