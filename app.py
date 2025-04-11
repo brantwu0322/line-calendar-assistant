@@ -88,13 +88,6 @@ if not os.path.exists(DB_PATH):
         ''')
         logger.info("users 表已創建或已存在")
         
-        # 檢查是否需要添加 subscription_status 欄位
-        c.execute("PRAGMA table_info(users)")
-        columns = [column[1] for column in c.fetchall()]
-        if 'subscription_status' not in columns:
-            logger.info("添加 subscription_status 欄位")
-            c.execute('ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT "free"')
-        
         # 創建 events 表
         c.execute('''
             CREATE TABLE IF NOT EXISTS events (
@@ -129,14 +122,6 @@ if not os.path.exists(DB_PATH):
             c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
                      (default_username, default_password))
             logger.info('已創建默認管理員帳號')
-        else:
-            # 如果默認管理員帳號存在，檢查密碼是否正確
-            if not check_password_hash(admin['password'], 'admin'):
-                # 如果密碼不正確，更新為默認密碼
-                default_password = generate_password_hash('admin')
-                c.execute('UPDATE admins SET password = ? WHERE username = ?',
-                         (default_password, 'admin'))
-                logger.info('已重置默認管理員密碼')
         
         conn.commit()
         conn.close()
@@ -380,14 +365,6 @@ def init_db(conn):
             c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
                      (default_username, default_password))
             logger.info('已創建默認管理員帳號')
-        else:
-            # 如果默認管理員帳號存在，檢查密碼是否正確
-            if not check_password_hash(admin['password'], 'admin'):
-                # 如果密碼不正確，更新為默認密碼
-                default_password = generate_password_hash('admin')
-                c.execute('UPDATE admins SET password = ? WHERE username = ?',
-                         (default_password, 'admin'))
-                logger.info('已重置默認管理員密碼')
         
         conn.commit()
         logger.info("資料庫初始化成功")
