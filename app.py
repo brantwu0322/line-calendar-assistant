@@ -117,28 +117,25 @@ try:
     ''')
     logger.info("admins 表已創建或已存在")
     
-    # 檢查是否有管理員帳號
-    c.execute("SELECT COUNT(*) FROM admins")
-    admin_count = c.fetchone()[0]
+    # 檢查默認管理員帳號是否存在
+    c.execute("SELECT password FROM admins WHERE username = 'admin'")
+    admin = c.fetchone()
     
-    if admin_count == 0:
-        # 創建默認管理員帳號
+    if not admin:
+        # 如果默認管理員帳號不存在，創建它
         default_username = 'admin'
         default_password = generate_password_hash('admin')
         c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
                  (default_username, default_password))
         logger.info('已創建默認管理員帳號')
     else:
-        # 檢查默認管理員帳號是否存在
-        c.execute("SELECT password FROM admins WHERE username = 'admin'")
-        admin = c.fetchone()
-        if not admin:
-            # 如果默認管理員帳號不存在，創建它
-            default_username = 'admin'
+        # 如果默認管理員帳號存在，檢查密碼是否正確
+        if not check_password_hash(admin['password'], 'admin'):
+            # 如果密碼不正確，更新為默認密碼
             default_password = generate_password_hash('admin')
-            c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
-                     (default_username, default_password))
-            logger.info('已創建默認管理員帳號')
+            c.execute('UPDATE admins SET password = ? WHERE username = ?',
+                     (default_password, 'admin'))
+            logger.info('已重置默認管理員密碼')
     
     conn.commit()
     conn.close()
@@ -371,28 +368,25 @@ def init_db(conn):
         ''')
         logger.info("admins 表已創建或已存在")
         
-        # 檢查是否有管理員帳號
-        c.execute("SELECT COUNT(*) FROM admins")
-        admin_count = c.fetchone()[0]
+        # 檢查默認管理員帳號是否存在
+        c.execute("SELECT password FROM admins WHERE username = 'admin'")
+        admin = c.fetchone()
         
-        if admin_count == 0:
-            # 創建默認管理員帳號
+        if not admin:
+            # 如果默認管理員帳號不存在，創建它
             default_username = 'admin'
             default_password = generate_password_hash('admin')
             c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
                      (default_username, default_password))
             logger.info('已創建默認管理員帳號')
         else:
-            # 檢查默認管理員帳號是否存在
-            c.execute("SELECT password FROM admins WHERE username = 'admin'")
-            admin = c.fetchone()
-            if not admin:
-                # 如果默認管理員帳號不存在，創建它
-                default_username = 'admin'
+            # 如果默認管理員帳號存在，檢查密碼是否正確
+            if not check_password_hash(admin['password'], 'admin'):
+                # 如果密碼不正確，更新為默認密碼
                 default_password = generate_password_hash('admin')
-                c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
-                         (default_username, default_password))
-                logger.info('已創建默認管理員帳號')
+                c.execute('UPDATE admins SET password = ? WHERE username = ?',
+                         (default_password, 'admin'))
+                logger.info('已重置默認管理員密碼')
         
         conn.commit()
         logger.info("資料庫初始化成功")
