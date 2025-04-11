@@ -79,13 +79,20 @@ try:
             line_user_id TEXT PRIMARY KEY,
             google_credentials TEXT,
             google_email TEXT,
-            status TEXT DEFAULT 'free',
+            subscription_status TEXT DEFAULT 'free',
             subscription_end_date TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     logger.info("users 表已創建或已存在")
+    
+    # 檢查是否需要添加 subscription_status 欄位
+    c.execute("PRAGMA table_info(users)")
+    columns = [column[1] for column in c.fetchall()]
+    if 'subscription_status' not in columns:
+        logger.info("添加 subscription_status 欄位")
+        c.execute('ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT "free"')
     
     # 創建 events 表
     c.execute('''
@@ -110,9 +117,11 @@ try:
     ''')
     logger.info("admins 表已創建或已存在")
     
-    # 檢查資料庫文件是否為新創建的
-    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='admins'")
-    if c.fetchone() is None:
+    # 檢查是否有管理員帳號
+    c.execute("SELECT COUNT(*) FROM admins")
+    admin_count = c.fetchone()[0]
+    
+    if admin_count == 0:
         # 創建默認管理員帳號
         default_username = 'admin'
         default_password = generate_password_hash('admin')
@@ -313,13 +322,20 @@ def init_db(conn):
                 line_user_id TEXT PRIMARY KEY,
                 google_credentials TEXT,
                 google_email TEXT,
-                status TEXT DEFAULT 'free',
+                subscription_status TEXT DEFAULT 'free',
                 subscription_end_date TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         logger.info("users 表已創建或已存在")
+        
+        # 檢查是否需要添加 subscription_status 欄位
+        c.execute("PRAGMA table_info(users)")
+        columns = [column[1] for column in c.fetchall()]
+        if 'subscription_status' not in columns:
+            logger.info("添加 subscription_status 欄位")
+            c.execute('ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT "free"')
         
         # 創建 events 表
         c.execute('''
@@ -344,9 +360,11 @@ def init_db(conn):
         ''')
         logger.info("admins 表已創建或已存在")
         
-        # 檢查資料庫文件是否為新創建的
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='admins'")
-        if c.fetchone() is None:
+        # 檢查是否有管理員帳號
+        c.execute("SELECT COUNT(*) FROM admins")
+        admin_count = c.fetchone()[0]
+        
+        if admin_count == 0:
             # 創建默認管理員帳號
             default_username = 'admin'
             default_password = generate_password_hash('admin')
@@ -355,13 +373,10 @@ def init_db(conn):
             logger.info('已創建默認管理員帳號')
         
         conn.commit()
-        conn.close()
         logger.info("資料庫初始化成功")
     except Exception as e:
         logger.error(f"資料庫初始化失敗：{str(e)}")
         logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
-        if conn:
-            conn.close()
         raise
 
 @with_db_connection
@@ -573,7 +588,7 @@ def handle_google_auth(line_user_id):
         logger.info(f"使用的重定向 URI: {OAUTH_REDIRECT_URI}")
         
         # 創建 OAuth 流程
-        flow = Flow.from_client_config(
+        flow = InstalledAppFlow.from_client_config(
             {
                 "web": {
                     "client_id": client_id,
@@ -1205,13 +1220,41 @@ def admin_login():
         username = request.form.get('username')
         password = request.form.get('password')
         
-        if verify_admin(username, password):
+        logger.info(f"嘗試登入的管理員帳號: {username}")
+        
+        if not username or not password:
+            logger.warning("登入失敗：帳號或密碼為空")
+            flash('請輸入帳號和密碼')
+            return redirect(url_for('admin_login'))
+        
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT username, password FROM admins WHERE username = ?', (username,))
+            admin = cursor.fetchone()
+            
+            if not admin:
+                logger.warning(f"登入失敗：找不到管理員帳號 {username}")
+                flash('帳號或密碼錯誤')
+                return redirect(url_for('admin_login'))
+            
+            if not check_password_hash(admin['password'], password):
+                logger.warning(f"登入失敗：密碼錯誤 {username}")
+                flash('帳號或密碼錯誤')
+                return redirect(url_for('admin_login'))
+            
+            logger.info(f"管理員登入成功: {username}")
             session['admin_logged_in'] = True
             session['admin_username'] = username
             return redirect(url_for('admin_dashboard'))
-        else:
-            flash('帳號或密碼錯誤')
+            
+        except Exception as e:
+            logger.error(f"登入時發生錯誤: {str(e)}")
+            logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
+            flash('登入時發生錯誤，請稍後再試')
             return redirect(url_for('admin_login'))
+        finally:
+            conn.close()
     
     return render_template('admin_login.html')
 
