@@ -170,7 +170,7 @@ CLIENT_SECRETS_FILE = 'client_secrets.json'
 converter = opencc.OpenCC('s2twp')
 
 # 設定 OAuth 重定向 URI
-OAUTH_REDIRECT_URI = 'https://line-calendar-assistant.onrender.com/oauth2callback'
+OAUTH_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'https://line-calendar-assistant.onrender.com/oauth2callback').strip()
 
 def with_db_connection(func):
     """資料庫連接裝飾器"""
@@ -570,6 +570,8 @@ def handle_google_auth(line_user_id):
             logger.error("缺少 Google OAuth 配置")
             return None
 
+        logger.info(f"使用的重定向 URI: {OAUTH_REDIRECT_URI}")
+        
         # 創建 OAuth 流程
         flow = Flow.from_client_config(
             {
