@@ -69,83 +69,84 @@ except Exception as e:
     raise
 
 # 初始化資料庫
-try:
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    # 創建 users 表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            line_user_id TEXT PRIMARY KEY,
-            google_credentials TEXT,
-            google_email TEXT,
-            subscription_status TEXT DEFAULT 'free',
-            subscription_end_date TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    logger.info("users 表已創建或已存在")
-    
-    # 檢查是否需要添加 subscription_status 欄位
-    c.execute("PRAGMA table_info(users)")
-    columns = [column[1] for column in c.fetchall()]
-    if 'subscription_status' not in columns:
-        logger.info("添加 subscription_status 欄位")
-        c.execute('ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT "free"')
-    
-    # 創建 events 表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            line_user_id TEXT,
-            event_id TEXT,
-            event_data TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
-        )
-    ''')
-    logger.info("events 表已創建或已存在")
-    
-    # 創建 admins 表
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS admins (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    logger.info("admins 表已創建或已存在")
-    
-    # 檢查默認管理員帳號是否存在
-    c.execute("SELECT password FROM admins WHERE username = 'admin'")
-    admin = c.fetchone()
-    
-    if not admin:
-        # 如果默認管理員帳號不存在，創建它
-        default_username = 'admin'
-        default_password = generate_password_hash('admin')
-        c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
-                 (default_username, default_password))
-        logger.info('已創建默認管理員帳號')
-    else:
-        # 如果默認管理員帳號存在，檢查密碼是否正確
-        if not check_password_hash(admin['password'], 'admin'):
-            # 如果密碼不正確，更新為默認密碼
+if not os.path.exists(DB_PATH):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # 創建 users 表
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                line_user_id TEXT PRIMARY KEY,
+                google_credentials TEXT,
+                google_email TEXT,
+                subscription_status TEXT DEFAULT 'free',
+                subscription_end_date TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        logger.info("users 表已創建或已存在")
+        
+        # 檢查是否需要添加 subscription_status 欄位
+        c.execute("PRAGMA table_info(users)")
+        columns = [column[1] for column in c.fetchall()]
+        if 'subscription_status' not in columns:
+            logger.info("添加 subscription_status 欄位")
+            c.execute('ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT "free"')
+        
+        # 創建 events 表
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                line_user_id TEXT,
+                event_id TEXT,
+                event_data TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (line_user_id) REFERENCES users (line_user_id)
+            )
+        ''')
+        logger.info("events 表已創建或已存在")
+        
+        # 創建 admins 表
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS admins (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        logger.info("admins 表已創建或已存在")
+        
+        # 檢查默認管理員帳號是否存在
+        c.execute("SELECT password FROM admins WHERE username = 'admin'")
+        admin = c.fetchone()
+        
+        if not admin:
+            # 如果默認管理員帳號不存在，創建它
+            default_username = 'admin'
             default_password = generate_password_hash('admin')
-            c.execute('UPDATE admins SET password = ? WHERE username = ?',
-                     (default_password, 'admin'))
-            logger.info('已重置默認管理員密碼')
-    
-    conn.commit()
-    conn.close()
-    logger.info("資料庫初始化成功")
-except Exception as e:
-    logger.error(f"資料庫初始化失敗：{str(e)}")
-    logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
-    if conn:
+            c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
+                     (default_username, default_password))
+            logger.info('已創建默認管理員帳號')
+        else:
+            # 如果默認管理員帳號存在，檢查密碼是否正確
+            if not check_password_hash(admin['password'], 'admin'):
+                # 如果密碼不正確，更新為默認密碼
+                default_password = generate_password_hash('admin')
+                c.execute('UPDATE admins SET password = ? WHERE username = ?',
+                         (default_password, 'admin'))
+                logger.info('已重置默認管理員密碼')
+        
+        conn.commit()
         conn.close()
-    raise
+        logger.info("資料庫初始化成功")
+    except Exception as e:
+        logger.error(f"資料庫初始化失敗：{str(e)}")
+        logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
+        if conn:
+            conn.close()
+        raise
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
