@@ -1443,86 +1443,116 @@ def delete_user(line_user_id):
     finally:
         conn.close()
 
-@app.route('/oauth2callback')
-@with_db_connection
-def oauth2callback(conn):
-    """處理 Google OAuth 回調"""
+@app.route('/authorize')
+def authorize():
+    """處理 Google OAuth 授權"""
     try:
-        # 獲取授權碼和狀態
-        code = request.args.get('code')
-        state = request.args.get('state')
-        
-        if not code or not state:
-            logger.error("缺少必要的參數")
-            return "授權失敗：缺少必要的參數", 400
-        
-        # 從狀態參數中獲取 LINE 用戶 ID
-        line_user_id = state
-        
-        # 從環境變數獲取 Google 憑證
+        line_user_id = request.args.get('line_user_id')
+        if not line_user_id:
+            logger.error("缺少 line_user_id 參數")
+            return "缺少必要參數", 400
+
+        # 從環境變數獲取 Google OAuth 配置
         google_credentials = os.getenv('GOOGLE_CREDENTIALS')
         if not google_credentials:
             logger.error("缺少 Google OAuth 配置")
-            return "授權失敗：缺少必要的配置", 500
+            return "系統配置錯誤", 500
 
         try:
-            # 解析 JSON 格式的憑證
-            credentials_json = json.loads(google_credentials)
-            client_id = credentials_json['web']['client_id']
-            client_secret = credentials_json['web']['client_secret']
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"解析 Google 憑證時發生錯誤: {str(e)}")
-            return "授權失敗：憑證格式錯誤", 500
-        
+            credentials_data = json.loads(google_credentials)
+        except json.JSONDecodeError:
+            logger.error("Google OAuth 配置格式錯誤")
+            return "系統配置錯誤", 500
+
         # 創建 OAuth 流程
         flow = Flow.from_client_config(
-            {
-                "web": {
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [OAUTH_REDIRECT_URI]
-                }
-            },
+            credentials_data,
             scopes=SCOPES,
             redirect_uri=OAUTH_REDIRECT_URI
         )
-        
-        try:
-            # 交換授權碼獲取憑證
-            flow.fetch_token(code=code)
-            credentials = flow.credentials
-            
-            # 儲存憑證
-            save_user_credentials(conn, line_user_id, credentials)
-            
-            # 獲取用戶信息
-            userinfo_service = build('oauth2', 'v2', credentials=credentials)
-            userinfo = userinfo_service.userinfo().get().execute()
-            google_email = userinfo.get('email')
-            
-            # 更新用戶的 Google 郵箱
-            cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE users 
-                SET google_email = ? 
-                WHERE line_user_id = ?
-            ''', (google_email, line_user_id))
-            conn.commit()
-            
-            logger.info(f"Google 授權成功: {line_user_id}")
-            return render_template('oauth_success.html')
-            
-        except Exception as e:
-            logger.error(f"交換授權碼時發生錯誤: {str(e)}")
-            logger.error(traceback.format_exc())
-            return "授權失敗：無法交換授權碼", 500
-            
+
+        # 生成授權 URL
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent'
+        )
+
+        # 儲存 state 和 line_user_id
+        session['state'] = state
+        session['line_user_id'] = line_user_id
+
+        logger.info(f"重定向到授權 URL: {authorization_url}")
+        return redirect(authorization_url)
+
     except Exception as e:
-        logger.error(f"Google 授權回調處理失敗: {str(e)}")
-        logger.error(traceback.format_exc())
-        return f"授權失敗：{str(e)}", 500
+        logger.error(f"授權過程發生錯誤: {str(e)}")
+        logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
+        return "授權過程發生錯誤", 500
+
+@app.route('/oauth2callback')
+def oauth2callback():
+    """處理 Google OAuth 回調"""
+    try:
+        # 檢查 state 參數
+        state = request.args.get('state')
+        stored_state = session.get('state')
+        
+        if not state or state != stored_state:
+            logger.error("State 驗證失敗")
+            return "授權失敗：安全驗證錯誤", 400
+
+        # 獲取 line_user_id
+        line_user_id = session.get('line_user_id')
+        if not line_user_id:
+            logger.error("找不到 line_user_id")
+            return "授權失敗：找不到使用者資訊", 400
+
+        # 從環境變數獲取 Google OAuth 配置
+        google_credentials = os.getenv('GOOGLE_CREDENTIALS')
+        if not google_credentials:
+            logger.error("缺少 Google OAuth 配置")
+            return "系統配置錯誤", 500
+
+        try:
+            credentials_data = json.loads(google_credentials)
+        except json.JSONDecodeError:
+            logger.error("Google OAuth 配置格式錯誤")
+            return "系統配置錯誤", 500
+
+        # 創建 OAuth 流程
+        flow = Flow.from_client_config(
+            credentials_data,
+            scopes=SCOPES,
+            redirect_uri=OAUTH_REDIRECT_URI
+        )
+
+        # 處理授權回應
+        flow.fetch_token(authorization_response=request.url)
+        credentials = flow.credentials
+
+        # 獲取使用者的 Google 帳號
+        try:
+            service = build('oauth2', 'v2', credentials=credentials)
+            user_info = service.userinfo().get().execute()
+            google_email = user_info.get('email')
+        except Exception as e:
+            logger.error(f"獲取 Google 帳號資訊失敗: {str(e)}")
+            google_email = None
+
+        # 儲存使用者憑證
+        save_user_credentials(line_user_id, credentials, google_email)
+        
+        # 清除 session
+        session.pop('state', None)
+        session.pop('line_user_id', None)
+
+        return render_template('auth_success.html')
+
+    except Exception as e:
+        logger.error(f"OAuth 回調處理失敗: {str(e)}")
+        logger.error(f"詳細錯誤資訊：\n{traceback.format_exc()}")
+        return "授權過程發生錯誤", 500
 
 @with_db_connection
 def get_all_admins(conn):
@@ -1924,19 +1954,6 @@ def handle_event_creation(user_id, event_info):
     except Exception as e:
         logger.error(f"建立行程時發生錯誤：{str(e)}")
         return "建立行程時發生錯誤，請稍後再試。"
-
-@app.route('/authorize')
-def authorize():
-    """授權頁面"""
-    line_user_id = request.args.get('line_user_id')
-    if not line_user_id:
-        return "缺少 line_user_id 參數", 400
-
-    auth_url = handle_google_auth(line_user_id)
-    if not auth_url:
-        return "無法生成授權 URL", 500
-
-    return render_template('authorize.html', auth_url=auth_url)
 
 if __name__ == "__main__":
     logger.info("Starting Flask application...")
