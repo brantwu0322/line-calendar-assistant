@@ -19,16 +19,11 @@ services:
           name: line-bot
           type: secret
           property: channel-access-token
-      - key: GOOGLE_CLIENT_ID
+      - key: GOOGLE_CREDENTIALS
         fromService:
           name: google-oauth
           type: secret
-          property: client-id
-      - key: GOOGLE_CLIENT_SECRET
-        fromService:
-          name: google-oauth
-          type: secret
-          property: client-secret
+          property: credentials
       - key: GOOGLE_REDIRECT_URI
         value: https://line-calendar-assistant.onrender.com/oauth2callback
       - key: OPENAI_API_KEY

@@ -128,6 +128,17 @@ try:
         c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
                  (default_username, default_password))
         logger.info('已創建默認管理員帳號')
+    else:
+        # 檢查默認管理員帳號是否存在
+        c.execute("SELECT password FROM admins WHERE username = 'admin'")
+        admin = c.fetchone()
+        if not admin:
+            # 如果默認管理員帳號不存在，創建它
+            default_username = 'admin'
+            default_password = generate_password_hash('admin')
+            c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
+                     (default_username, default_password))
+            logger.info('已創建默認管理員帳號')
     
     conn.commit()
     conn.close()
@@ -371,6 +382,17 @@ def init_db(conn):
             c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
                      (default_username, default_password))
             logger.info('已創建默認管理員帳號')
+        else:
+            # 檢查默認管理員帳號是否存在
+            c.execute("SELECT password FROM admins WHERE username = 'admin'")
+            admin = c.fetchone()
+            if not admin:
+                # 如果默認管理員帳號不存在，創建它
+                default_username = 'admin'
+                default_password = generate_password_hash('admin')
+                c.execute('INSERT INTO admins (username, password) VALUES (?, ?)',
+                         (default_username, default_password))
+                logger.info('已創建默認管理員帳號')
         
         conn.commit()
         logger.info("資料庫初始化成功")
@@ -577,18 +599,25 @@ def handle_google_auth(line_user_id):
         if credentials:
             return None
 
-        # 從環境變數獲取 client_id 和 client_secret
-        client_id = os.getenv('GOOGLE_CLIENT_ID')
-        client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
-        
-        if not client_id or not client_secret:
+        # 從環境變數獲取 Google 憑證
+        google_credentials = os.getenv('GOOGLE_CREDENTIALS')
+        if not google_credentials:
             logger.error("缺少 Google OAuth 配置")
+            return None
+
+        try:
+            # 解析 JSON 格式的憑證
+            credentials_json = json.loads(google_credentials)
+            client_id = credentials_json['web']['client_id']
+            client_secret = credentials_json['web']['client_secret']
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"解析 Google 憑證時發生錯誤: {str(e)}")
             return None
 
         logger.info(f"使用的重定向 URI: {OAUTH_REDIRECT_URI}")
         
         # 創建 OAuth 流程
-        flow = InstalledAppFlow.from_client_config(
+        flow = Flow.from_client_config(
             {
                 "web": {
                     "client_id": client_id,
@@ -598,11 +627,9 @@ def handle_google_auth(line_user_id):
                     "redirect_uris": [OAUTH_REDIRECT_URI]
                 }
             },
-            scopes=SCOPES
+            scopes=SCOPES,
+            redirect_uri=OAUTH_REDIRECT_URI
         )
-        
-        # 設置重定向 URI
-        flow.redirect_uri = OAUTH_REDIRECT_URI
 
         # 生成授權 URL
         auth_url, _ = flow.authorization_url(
@@ -1438,13 +1465,20 @@ def oauth2callback(conn):
         # 從狀態參數中獲取 LINE 用戶 ID
         line_user_id = state
         
-        # 獲取 Google OAuth 配置
-        client_id = os.getenv('GOOGLE_CLIENT_ID')
-        client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
-        
-        if not all([client_id, client_secret]):
+        # 從環境變數獲取 Google 憑證
+        google_credentials = os.getenv('GOOGLE_CREDENTIALS')
+        if not google_credentials:
             logger.error("缺少 Google OAuth 配置")
             return "授權失敗：缺少必要的配置", 500
+
+        try:
+            # 解析 JSON 格式的憑證
+            credentials_json = json.loads(google_credentials)
+            client_id = credentials_json['web']['client_id']
+            client_secret = credentials_json['web']['client_secret']
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"解析 Google 憑證時發生錯誤: {str(e)}")
+            return "授權失敗：憑證格式錯誤", 500
         
         # 創建 OAuth 流程
         flow = Flow.from_client_config(
@@ -1457,11 +1491,9 @@ def oauth2callback(conn):
                     "redirect_uris": [OAUTH_REDIRECT_URI]
                 }
             },
-            scopes=SCOPES
+            scopes=SCOPES,
+            redirect_uri=OAUTH_REDIRECT_URI
         )
-        
-        # 設置重定向 URI
-        flow.redirect_uri = OAUTH_REDIRECT_URI
         
         try:
             # 交換授權碼獲取憑證
