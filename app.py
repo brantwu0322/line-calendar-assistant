@@ -1476,7 +1476,8 @@ def authorize():
         authorization_url, state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
-            prompt='consent'
+            prompt='consent',
+            redirect_uri=OAUTH_REDIRECT_URI  # 明確指定 redirect_uri
         )
 
         # 儲存 state 和 line_user_id
