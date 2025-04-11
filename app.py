@@ -562,28 +562,44 @@ def handle_google_auth(line_user_id):
         if credentials:
             return None
 
+        # 從環境變數獲取 client_id 和 client_secret
+        client_id = os.getenv('GOOGLE_CLIENT_ID')
+        client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+        
+        if not client_id or not client_secret:
+            logger.error("缺少 Google OAuth 配置")
+            return None
+
         # 創建 OAuth 流程
-        flow = InstalledAppFlow.from_client_config(
+        flow = Flow.from_client_config(
             {
                 "web": {
-                    "client_id": os.getenv('GOOGLE_CLIENT_ID'),
-                    "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+                    "client_id": client_id,
+                    "client_secret": client_secret,
                     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                     "token_uri": "https://oauth2.googleapis.com/token",
                     "redirect_uris": [OAUTH_REDIRECT_URI]
                 }
             },
-            SCOPES
+            scopes=SCOPES
         )
+        
+        # 設置重定向 URI
+        flow.redirect_uri = OAUTH_REDIRECT_URI
+
+        # 生成授權 URL
         auth_url, _ = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
             state=line_user_id,
-            redirect_uri=OAUTH_REDIRECT_URI
+            prompt='consent'  # 強制顯示同意畫面
         )
+        
+        logger.info(f"Generated auth URL with redirect_uri: {OAUTH_REDIRECT_URI}")
         return auth_url
     except Exception as e:
         logger.error(f"Google 授權錯誤: {str(e)}")
+        logger.error(traceback.format_exc())
         return None
 
 # OpenAI API 設定
@@ -1396,35 +1412,45 @@ def oauth2callback(conn):
                     "redirect_uris": [OAUTH_REDIRECT_URI]
                 }
             },
-            scopes=SCOPES,
-            redirect_uri=OAUTH_REDIRECT_URI
+            scopes=SCOPES
         )
         
-        # 交換授權碼獲取憑證
-        flow.fetch_token(code=code)
-        credentials = flow.credentials
+        # 設置重定向 URI
+        flow.redirect_uri = OAUTH_REDIRECT_URI
         
-        # 儲存憑證
-        save_user_credentials(conn, line_user_id, credentials)
-        
-        # 獲取用戶信息
-        userinfo_service = build('oauth2', 'v2', credentials=credentials)
-        userinfo = userinfo_service.userinfo().get().execute()
-        google_email = userinfo.get('email')
-        
-        # 更新用戶的 Google 郵箱
-        cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE users 
-            SET google_email = ? 
-            WHERE line_user_id = ?
-        ''', (google_email, line_user_id))
-        conn.commit()
-        
-        logger.info(f"Google 授權成功: {line_user_id}")
-        return render_template('oauth_success.html')
+        try:
+            # 交換授權碼獲取憑證
+            flow.fetch_token(code=code)
+            credentials = flow.credentials
+            
+            # 儲存憑證
+            save_user_credentials(conn, line_user_id, credentials)
+            
+            # 獲取用戶信息
+            userinfo_service = build('oauth2', 'v2', credentials=credentials)
+            userinfo = userinfo_service.userinfo().get().execute()
+            google_email = userinfo.get('email')
+            
+            # 更新用戶的 Google 郵箱
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE users 
+                SET google_email = ? 
+                WHERE line_user_id = ?
+            ''', (google_email, line_user_id))
+            conn.commit()
+            
+            logger.info(f"Google 授權成功: {line_user_id}")
+            return render_template('oauth_success.html')
+            
+        except Exception as e:
+            logger.error(f"交換授權碼時發生錯誤: {str(e)}")
+            logger.error(traceback.format_exc())
+            return "授權失敗：無法交換授權碼", 500
+            
     except Exception as e:
         logger.error(f"Google 授權回調處理失敗: {str(e)}")
+        logger.error(traceback.format_exc())
         return f"授權失敗：{str(e)}", 500
 
 @with_db_connection
